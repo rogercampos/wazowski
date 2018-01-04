@@ -11,6 +11,29 @@ module Wazowski
   NoSuchNode = Class.new(StandardError)
   ConfigurationError = Class.new(StandardError)
 
+  module Observable
+    extend ActiveSupport::Concern
+
+    class_methods do
+      def observable(name, &block)
+        id = "#{self.name || object_id}/#{name}"
+
+        if Config.derivations.key?(id)
+          raise(ConfigurationError, "Already defined #{name} derivation for module #{self.name}")
+        end
+
+        node = Node.new(id, self, block)
+        Config.derivations[id] = node
+
+        ActiveRecordAdapter.register_node(id, node.dependants)
+      end
+    end
+  end
+
+  class Observer
+    include Observable
+  end
+
   module Config
     mattr_accessor :derivations
     self.derivations = {}
@@ -19,8 +42,9 @@ module Wazowski
   class Node
     attr_reader :name
 
-    def initialize(name, block)
+    def initialize(name, klass, block)
       @name = name
+      @observer_klass = klass
       instance_eval(&block)
     end
 
@@ -64,54 +88,34 @@ module Wazowski
       handler
     end
 
-    def wrapping(&block)
-      @wrapping_block = block
-    end
+    def wrapping
+      @context = @observer_klass.new
 
-    def with_wrapping(&block)
-      if @wrapping_block
-        @wrapping_block.call(block)
-      else
-        yield
-      end
+      yield
     end
 
     def after_commit_on_update(klass, object, dirty_changes)
+      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
       handler = lookup_handler(klass)
 
       return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:update)
-      handler[:block].call(object, :update, dirty_changes)
+      @context.instance_exec(object, :update, dirty_changes, &handler[:block])
     end
 
     def after_commit_on_delete(klass, object)
+      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
       handler = lookup_handler(klass)
 
       return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:delete)
-      handler[:block].call(object, :delete, {})
+      @context.instance_exec(object, :delete, {}, &handler[:block])
     end
 
     def after_commit_on_create(klass, object)
+      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
       handler = lookup_handler(klass)
 
       return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:insert)
-      handler[:block].call(object, :insert, {})
-    end
-  end
-
-  extend ActiveSupport::Concern
-
-  class_methods do
-    def observable(name, &block)
-      id = "#{self.name || object_id}/#{name}"
-
-      if Config.derivations.key?(id)
-        raise(ConfigurationError, "Already defined #{name} derivation for module #{self.name}")
-      end
-
-      node = Node.new(id, block)
-      Config.derivations[id] = node
-
-      ActiveRecordAdapter.register_node(id, node.dependants)
+      @context.instance_exec(object, :insert, {}, &handler[:block])
     end
   end
 
@@ -120,11 +124,11 @@ module Wazowski
       Config.derivations[node_id] || raise(NoSuchNode, "Node not found! #{node_id}")
     end
 
-    def run_handlers
-      ActiveRecordAdapter.for_changes_per_node do |node_id, changes|
+    def run_handlers(changes_per_node)
+      changes_per_node.each do |node_id, changes|
         node = find_node(node_id)
 
-        node.with_wrapping do
+        node.wrapping do
           changes.each do |change_type, klass, object, changeset|
             case change_type
               when :insert

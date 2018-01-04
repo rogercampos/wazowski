@@ -2,8 +2,6 @@ module Wazowski
   module ActiveRecordAdapter
     module TransactionState
       class StateData
-        attr_reader :changed_models
-
         def initialize
           @changed_models = Set.new
         end
@@ -11,7 +9,15 @@ module Wazowski
         def run_after_commit_only_once!
           return if @changed_models.empty?
 
-          Wazowski.run_handlers
+          info = {}
+
+          TransactionState.current_state.uniq_changed_models.each do |model|
+            info.merge!(model.__wazowski_changes_per_node) do |_, old_val, new_val|
+              old_val + new_val
+            end
+          end
+
+          Wazowski.run_handlers(info)
 
           clear_after_commit_performed!
         end
@@ -22,6 +28,15 @@ module Wazowski
 
         def register_model_changed(model)
           @changed_models << model
+        end
+
+        # It's possible for #register_model_changed to be called
+        # twice with the same object but before and after persisting it.
+        # The two objects are considered different at the registration time
+        # but become the same on after commit. This method re-creates a set to
+        # enforce unique elements.
+        def uniq_changed_models
+          Set.new @changed_models
         end
       end
 
@@ -121,15 +136,14 @@ module Wazowski
 
           unless states.include?(:insert) && states.include?(:delete)
             __wazowski_presence_state.each do |type, node_id|
+              info[node_id] ||= []
+
               case type
                 when :insert
-                  info[node_id] ||= []
                   info[node_id] << [:insert, self.class, self]
                 when :delete
-                  info[node_id] ||= []
                   info[node_id] << [:delete, self.class, self]
                 when :update
-                  info[node_id] ||= []
                   info[node_id] << [:update, self.class, self, {}]
               end
             end
@@ -190,18 +204,5 @@ module Wazowski
         end
       end
     end
-
-    def self.for_changes_per_node
-      info = {}
-
-      TransactionState.current_state.changed_models.each do |model|
-        info.merge!(model.__wazowski_changes_per_node)
-      end
-
-      info.each do |node_id, changes|
-        yield(node_id, changes)
-      end
-    end
-
   end
 end

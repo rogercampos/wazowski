@@ -60,24 +60,27 @@ module StubReceiver
   end
 end
 
-Module.new do
-  include Wazowski
+class TestObserver < Wazowski::Observer
+  def initialize
+    @counter = 0
+  end
+
+  def increment_handler_counter!
+    @counter += 1
+  end
 
   observable(:valid_comments_count) do
     depends_on Comment, :post_id, :state
     depends_on Post, :none
 
     foo = proc do |obj, change_type, changes|
+      increment_handler_counter!
       StubReceiver.trigger(obj, change_type, changes)
+      StubReceiver.counter_status(@counter)
     end
 
     handler(Comment, &foo)
     handler(Post, &foo)
-
-    wrapping do |action|
-      StubReceiver.wrapping_called
-      action.call
-    end
   end
 
   observable(:only_on_insert) do
