@@ -1,3 +1,6 @@
+[![Build Status](https://travis-ci.org/rogercampos/wazowski.svg?branch=master)](https://travis-ci.org/rogercampos/wazowski)
+
+
 # Wazowski
 
 You can use this library to observe changes on data and execute your code when those changes occur.
