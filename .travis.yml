@@ -1,0 +1,7 @@
+sudo: false
+language: ruby
+rvm:
+  - 2.3.4
+before_install: gem install bundler -v 1.16.0
+env:
+  - WAZOWSKI_PG_DATABASE=travis_ci_test

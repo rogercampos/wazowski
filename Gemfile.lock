@@ -1,0 +1,46 @@
+PATH
+  remote: .
+  specs:
+    wazowski (0.1.0)
+      activerecord (>= 4.2)
+      activesupport (>= 4.2)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    activemodel (5.1.4)
+      activesupport (= 5.1.4)
+    activerecord (5.1.4)
+      activemodel (= 5.1.4)
+      activesupport (= 5.1.4)
+      arel (~> 8.0)
+    activesupport (5.1.4)
+      concurrent-ruby (~> 1.0, >= 1.0.2)
+      i18n (~> 0.7)
+      minitest (~> 5.1)
+      tzinfo (~> 1.1)
+    arel (8.0.0)
+    concurrent-ruby (1.0.5)
+    dotenv (2.2.1)
+    i18n (0.9.1)
+      concurrent-ruby (~> 1.0)
+    minitest (5.11.1)
+    pg (0.21.0)
+    rake (10.5.0)
+    thread_safe (0.3.6)
+    tzinfo (1.2.4)
+      thread_safe (~> 0.1)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  bundler (~> 1.16)
+  dotenv
+  minitest (~> 5.0)
+  pg
+  rake (~> 10.0)
+  wazowski!
+
+BUNDLED WITH
+   1.16.0
