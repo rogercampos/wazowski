@@ -18,10 +18,6 @@ module Wazowski
       def observable(name, &block)
         id = "#{self.name || object_id}/#{name}"
 
-        if Config.derivations.key?(id)
-          raise(ConfigurationError, "Already defined #{name} derivation for module #{self.name}")
-        end
-
         node = Node.new(id, self, block)
         Config.derivations[id] = node
 
