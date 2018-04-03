@@ -3,10 +3,10 @@ language: ruby
 cache: bundler
 rvm:
   - 2.3.4
-  - 2.4.0
+  - 2.4.3
+  - 2.5.0
 services:
   - postgresql
-before_install: gem install bundler -v 1.16.0
 env:
   - WAZOWSKI_PG_DATABASE=travis_ci_test WAZOWSKI_PG_USERNAME=postgres
 before_script:
