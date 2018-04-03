@@ -29,6 +29,23 @@ ActiveRecord::Schema.define do
     table.column :title, :string
     table.column :body, :text
   end
+
+  create_table :ships, force: true do |table|
+    table.column :name, :string
+    table.column :value, :integer
+    table.column :planet_id, :integer
+    table.column :label, :string
+    table.column :engine, :string
+    table.column :brand, :string
+  end
+
+  create_table :planets, force: true do |t|
+    t.column :name, :string
+    t.column :size, :integer
+    t.column :a1, :string
+    t.column :a2, :string
+    t.column :a3, :string
+  end
 end
 
 class Comment < ActiveRecord::Base
@@ -41,6 +58,13 @@ class Page < ActiveRecord::Base
 end
 
 class SubPage < Page
+end
+
+class Ship < ActiveRecord::Base
+  belongs_to :planet
+end
+
+class Planet < ActiveRecord::Base
 end
 
 module StubReceiver
@@ -57,6 +81,53 @@ module StubReceiver
   def method_missing(name, *args)
     data[name] ||= []
     data[name] << args
+  end
+end
+
+class PlanetsObserver < Wazowski::Observer
+  def update!(planet)
+    planet.update_attributes! size: rand(1000)
+  end
+
+  observable(:no_loop) do
+    depends_on Ship, :name
+    depends_on Planet, :name
+
+    handler(Ship, only: :update) do |ship|
+      update!(ship.planet)
+    end
+
+    handler(Planet, only: :update) do |planet|
+      update!(planet)
+    end
+  end
+
+  observable(:infinite_loop_on_ship) do
+    depends_on Ship, :label
+    handler(Ship, only: :update) do |ship|
+      ship.update_attributes! label: SecureRandom.hex
+    end
+  end
+
+  observable(:update_with_no_infinite_loop) do
+    depends_on Ship, :engine
+    handler(Ship, only: :update) do |ship|
+      ship.update_attributes! brand: "Foo"
+    end
+  end
+
+  observable(:nested_observers_a1) do
+    depends_on Planet, :a1
+    handler(Planet, only: :update) do |planet|
+      planet.update_attributes! a2: "second step"
+    end
+  end
+
+  observable(:nested_observers_a2) do
+    depends_on Planet, :a2
+    handler(Planet, only: :update) do |planet|
+      planet.update_attributes! a3: "third step"
+    end
   end
 end
 

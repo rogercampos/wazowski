@@ -148,6 +148,11 @@ Your blocks will be executed always on `after_commit`. They will not run if the 
 Before triggering your code, the changes that happened inside the transaction will be accumulated 
 (ej: insert+delete = noop, insert + update = insert, etc.).
 
+Note that if you update attributes on a model inside a handler, this can result in an infinite loop if the attributes
+you're changing are also observed by the same handler. You can, however, "chain" multiple observers (i.e., one
+handler can trigger an update for an attribute observed in a second handler, etc.) as long as this graph 
+does not contain cycles. 
+
  
 ### Context of execution for handlers
 

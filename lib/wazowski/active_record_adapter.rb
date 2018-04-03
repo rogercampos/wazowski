@@ -11,15 +11,20 @@ module Wazowski
 
           info = {}
 
-          TransactionState.current_state.uniq_changed_models.each do |model|
+          # even @changed_models being a Set, it's possible that the "same" model
+          # have been included in the set before and after persistence (so they're different,
+          # we have both in the set) and by the time this code runs, the non persisted model
+          # becomes persisted and now they're identical, but still in the set.
+          # So we may have duplicates. `.to_a.uniq` to remove them.
+          @changed_models.to_a.uniq.each do |model|
             info.merge!(model.__wazowski_changes_per_node) do |_, old_val, new_val|
               old_val + new_val
             end
           end
 
-          Wazowski.run_handlers(info)
-
           clear_after_commit_performed!
+
+          Wazowski.run_handlers(info)
         end
 
         def clear_after_commit_performed!
@@ -28,15 +33,6 @@ module Wazowski
 
         def register_model_changed(model)
           @changed_models << model
-        end
-
-        # It's possible for #register_model_changed to be called
-        # twice with the same object but before and after persisting it.
-        # The two objects are considered different at the registration time
-        # but become the same on after commit. This method re-creates a set to
-        # enforce unique elements.
-        def uniq_changed_models
-          Set.new @changed_models
         end
       end
 
