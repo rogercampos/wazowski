@@ -173,7 +173,8 @@ class ObserversForSomething < Wazowski::Observer
 end
 ```
 
-The instance used as context will be newly created for every committed transaction occurred. 
+The instance used as context will be newly created for every committed transaction occurred. It will be also
+newly created for any `observable` declared.
 
 If you're observing multiple models inside an observable, and all those models experience changes inside a transaction 
 (say, i.e. 4 models), all your 4 handlers will be executed. Since all those changes occurred in a single transaction, 
