@@ -15,7 +15,7 @@ class AccumulationPerTransactionTest < BaseTest
 
     Comment.transaction do
       a.save!
-      a.update_attributes!(state: 'bar')
+      a.update!(state: 'bar')
     end
 
     assert_equal 1, StubReceiver.data[:trigger].size
@@ -26,7 +26,7 @@ class AccumulationPerTransactionTest < BaseTest
     a = Comment.create! state: 'foo'
 
     Comment.transaction do
-      a.update_attributes!(state: 'bar')
+      a.update!(state: 'bar')
       a.destroy
     end
 

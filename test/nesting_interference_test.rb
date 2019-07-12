@@ -5,25 +5,25 @@ class NestingInterferenceTest < BaseTest
     planet = Planet.create!
     ship = Ship.create! planet: planet
 
-    ship.update_attributes! name: "Noob"
+    ship.update! name: "Noob"
   end
 
   test "does enter an infinite loop if a handler triggers the observer again" do
     ship = Ship.create!
-    error = assert_raises(SystemStackError) { ship.update_attributes!(label: "foo") }
+    error = assert_raises(SystemStackError) { ship.update!(label: "foo") }
     assert_equal "stack level too deep", error.message
   end
 
   test "does not enter infinite loop if the handler updates an unobserved attribute" do
     ship = Ship.create!
-    ship.update_attributes! engine: "Warp"
+    ship.update! engine: "Warp"
     assert_equal "Warp", ship.engine
     assert_equal "Foo", ship.brand
   end
 
   test "observers can be chained" do
     planet = Planet.create!
-    planet.update_attributes! a1: "First step"
+    planet.update! a1: "First step"
     assert_equal "second step", planet.a2
     assert_equal "third step", planet.a3
   end

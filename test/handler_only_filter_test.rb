@@ -15,7 +15,7 @@ class HandlerOnlyFilterTest < BaseTest
 
   test ":only filter on handlers not called on update" do
     a = Post.create!
-    a.update_attributes! title: 'New title.'
+    a.update! title: 'New title.'
     assert_equal 1, StubReceiver.data[:only_on_insert].size
   end
 end

@@ -53,7 +53,7 @@ module Wazowski
         self.__wazowski_tracked_base = Set.new
         self.__wazowski_tracked_any = Set.new
 
-        before_update(append: true) do
+        before_update do
           self.class.__wazowski_tracked_any.each do |node_id|
             __wazowski_presence_state.push([:update, node_id])
             TransactionState.current_state.register_model_changed(self)
