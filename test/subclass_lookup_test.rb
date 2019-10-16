@@ -19,7 +19,7 @@ class SubclassLookupTest < BaseTest
 
   test "handlers are executed for subclasses on update" do
     a = SubPage.create! title: 'foo'
-    a.update_attributes! title: 'bar'
+    a.update! title: 'bar'
 
     assert_equal 2, StubReceiver.data[:trigger_on_subclass].size
     assert_equal [a, :update, title: %w[foo bar]], StubReceiver.data[:trigger_on_subclass][1]

@@ -86,7 +86,7 @@ end
 
 class PlanetsObserver < Wazowski::Observer
   def update!(planet)
-    planet.update_attributes! size: rand(1000)
+    planet.update! size: rand(1000)
   end
 
   observable(:no_loop) do
@@ -105,28 +105,28 @@ class PlanetsObserver < Wazowski::Observer
   observable(:infinite_loop_on_ship) do
     depends_on Ship, :label
     handler(Ship, only: :update) do |ship|
-      ship.update_attributes! label: SecureRandom.hex
+      ship.update! label: SecureRandom.hex
     end
   end
 
   observable(:update_with_no_infinite_loop) do
     depends_on Ship, :engine
     handler(Ship, only: :update) do |ship|
-      ship.update_attributes! brand: "Foo"
+      ship.update! brand: "Foo"
     end
   end
 
   observable(:nested_observers_a1) do
     depends_on Planet, :a1
     handler(Planet, only: :update) do |planet|
-      planet.update_attributes! a2: "second step"
+      planet.update! a2: "second step"
     end
   end
 
   observable(:nested_observers_a2) do
     depends_on Planet, :a2
     handler(Planet, only: :update) do |planet|
-      planet.update_attributes! a3: "third step"
+      planet.update! a3: "third step"
     end
   end
 end

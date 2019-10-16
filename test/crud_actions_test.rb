@@ -62,7 +62,7 @@ class CrudActionsTest < BaseTest
 
   test "UPDATE / calls the trigger" do
     a = Comment.create! state: 'foo'
-    a.update_attributes! state: 'bar'
+    a.update! state: 'bar'
 
     assert_equal 2, StubReceiver.data[:trigger].size
     assert_equal [a, :update, state: %w[foo bar]], StubReceiver.data[:trigger][1]
@@ -70,7 +70,7 @@ class CrudActionsTest < BaseTest
 
   test "UPDATE / doesn't call the trigger if an update occurs on a non-observed attribute" do
     a = Comment.create!
-    a.update_attributes! ignored: 'foo'
+    a.update! ignored: 'foo'
 
     # just 1 call for the creation
     assert_equal 1, StubReceiver.data[:trigger].size
@@ -78,7 +78,7 @@ class CrudActionsTest < BaseTest
 
   test "UPDATE / doesn't call the trigger if no observed attributes" do
     a = Post.create!
-    a.update_attributes! title: 'New title'
+    a.update! title: 'New title'
 
     # just 1 call for the creation
     assert_equal 1, StubReceiver.data[:trigger].size
@@ -86,7 +86,7 @@ class CrudActionsTest < BaseTest
 
   test "UPDATE / calls the trigger when observing any attributes, with no specific attribute info" do
     a = Page.create!
-    a.update_attributes! title: 'foo', body: 'bar'
+    a.update! title: 'foo', body: 'bar'
 
     assert_equal 2, StubReceiver.data[:trigger].size
     assert_equal [a, :update, {}], StubReceiver.data[:trigger][1]
@@ -96,8 +96,8 @@ class CrudActionsTest < BaseTest
     a = Comment.create! state: 's0'
 
     Comment.transaction do
-      a.update_attributes! state: 's1'
-      a.update_attributes! state: 's2'
+      a.update! state: 's1'
+      a.update! state: 's2'
     end
 
     assert_equal 2, StubReceiver.data[:trigger].size
@@ -106,23 +106,9 @@ class CrudActionsTest < BaseTest
 
   test "UPDATE / provides accumulated changes in only one call when multiple attributes are updated" do
     a = Comment.create! post_id: 1, state: 'foo'
-    a.update_attributes! post_id: 2, state: 'bar'
+    a.update! post_id: 2, state: 'bar'
 
     assert_equal 2, StubReceiver.data[:trigger].size
     assert_equal [a, :update, state: %w[foo bar], post_id: [1, 2]], StubReceiver.data[:trigger][1]
-  end
-
-  test "UPDATE / doesn't accumulate changes from previous rollbacks" do
-    a = Comment.create! post_id: 1, state: 'foo'
-
-    ActiveRecord::Base.transaction do
-      a.update_attributes! state: 'cuca'
-      raise ActiveRecord::Rollback
-    end
-
-    a.update_attributes!(post_id: 2)
-
-    assert_equal 2, StubReceiver.data[:trigger].size
-    assert_equal [a, :update, post_id: [1, 2]], StubReceiver.data[:trigger][1]
   end
 end

@@ -12,14 +12,14 @@ class ThreadSafetyTest < BaseTest
         ActiveRecord::Base.transaction do
           # update must happen in a new AR object to isolate
           # both threads
-          Comment.find(id).update_attributes!(state: "bar")
+          Comment.find(id).update!(state: "bar")
           sleep 0.1
         end
       end
     end
 
     ActiveRecord::Base.transaction do
-      a.update_attributes!(post_id: 2)
+      a.update!(post_id: 2)
       sleep 0.05
     end
 
