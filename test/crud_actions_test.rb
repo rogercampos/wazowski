@@ -84,12 +84,12 @@ class CrudActionsTest < BaseTest
     assert_equal 1, StubReceiver.data[:trigger].size
   end
 
-  test "UPDATE / calls the trigger when observing any attributes, with no specific attribute info" do
+  test "UPDATE / calls the trigger when observing any attributes, with specific attribute info" do
     a = Page.create!
     a.update! title: 'foo', body: 'bar'
 
     assert_equal 2, StubReceiver.data[:trigger].size
-    assert_equal [a, :update, {}], StubReceiver.data[:trigger][1]
+    assert_equal [a, :update, title: [nil, 'foo'], body: [nil, 'bar']], StubReceiver.data[:trigger][1]
   end
 
   test "UPDATE / provides the accumulated changes based on transaction on only one trigger call" do

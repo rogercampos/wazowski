@@ -96,7 +96,7 @@ observable(:name) do
 end
 ```
 
-In this case the handler callback will receive no information about changes, even in update.
+In this case the handler callback will receive information about all the changes occurred.
 
 You can also observe a model's "presence". Your code will be executed only on create and deletion of the dependant
 model, but not on updates:
@@ -116,9 +116,9 @@ You can also observe more than one model in one observable, in this case you mus
 
 ```ruby
 observable(:user_sync_to_salesforce) do
-  depends_on User, :all
+  depends_on User, :any
   depends_on Order, :none
-  depends_on BillingInfo, :all
+  depends_on BillingInfo, :any
   
   foo = proc do |obj, event, changes|
     # reused handler
@@ -214,9 +214,9 @@ class MyObserver < Wazowski::Observer
   end
  
   observable(:user_sync_to_salesforce) do
-    depends_on User, :all
+    depends_on User, :any
     depends_on Order, :none
-    depends_on BillingInfo, :all
+    depends_on BillingInfo, :any
   
     handler(User) { |user| 
       run_only_once { Etl.run(user) } 

@@ -55,8 +55,9 @@ module Wazowski
 
         before_update do
           self.class.__wazowski_tracked_any.each do |node_id|
-            __wazowski_presence_state.push([:update, node_id])
-            TransactionState.current_state.register_model_changed(self)
+            changes.each do |attr, (old_value, _new_value)|
+              __wazowski_store_dirty!(attr.to_sym, node_id, :update, old_value)
+            end
           end
 
           self.class.__wazowski_tracked_attrs.each do |attr, node_ids|
@@ -139,8 +140,6 @@ module Wazowski
                   info[node_id] << [:insert, self.class, self]
                 when :delete
                   info[node_id] << [:delete, self.class, self]
-                when :update
-                  info[node_id] << [:update, self.class, self, {}]
               end
             end
           end
