@@ -68,9 +68,11 @@ module Wazowski
         end
 
         before_destroy do
-          self.class.__wazowski_all_nodes.each do |node_id|
-            __wazowski_presence_state.push([:delete, node_id])
-            TransactionState.current_state.register_model_changed(self)
+          unless self.new_record?
+            self.class.__wazowski_all_nodes.each do |node_id|
+              __wazowski_presence_state.push([:delete, node_id])
+              TransactionState.current_state.register_model_changed(self)
+            end
           end
         end
 
