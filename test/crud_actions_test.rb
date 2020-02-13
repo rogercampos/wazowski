@@ -60,6 +60,13 @@ class CrudActionsTest < BaseTest
     assert_equal [a, :delete, {}], StubReceiver.data[:trigger][1]
   end
 
+  test "DELETE / doesn't call the trigger on not persisted object" do
+    a = Post.new
+    a.destroy
+
+    assert_nil StubReceiver.data[:trigger]
+  end
+
   test "UPDATE / calls the trigger" do
     a = Comment.create! state: 'foo'
     a.update! state: 'bar'
