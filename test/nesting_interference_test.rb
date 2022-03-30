@@ -27,4 +27,10 @@ class NestingInterferenceTest < BaseTest
     assert_equal "second step", planet.a2
     assert_equal "third step", planet.a3
   end
+
+  test "chained observers don't get called multiple times" do
+    planet = Planet.create!
+    planet.update! a1: "First step"
+    assert_equal 1, planet.count_on_nested_observers_a1_callings
+  end
 end

@@ -45,6 +45,7 @@ ActiveRecord::Schema.define do
     t.column :a1, :string
     t.column :a2, :string
     t.column :a3, :string
+    t.column :count_on_nested_observers_a1_callings, :integer, default: 0
   end
 end
 
@@ -120,6 +121,7 @@ class PlanetsObserver < Wazowski::Observer
     depends_on Planet, :a1
     handler(Planet, only: :update) do |planet|
       planet.update! a2: "second step"
+      planet.increment!(:count_on_nested_observers_a1_callings)
     end
   end
 

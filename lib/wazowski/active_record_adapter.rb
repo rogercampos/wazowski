@@ -20,6 +20,9 @@ module Wazowski
             info.merge!(model.__wazowski_changes_per_node) do |_, old_val, new_val|
               old_val + new_val
             end
+
+            model.__wazowski_clean_dirty!
+            model.__wazowski_presence_state.clear
           end
 
           clear_after_commit_performed!
@@ -85,9 +88,6 @@ module Wazowski
 
         after_commit do
           TransactionState.current_state.run_after_commit_only_once!
-
-          __wazowski_clean_dirty!
-          __wazowski_presence_state.clear
         end
 
         after_rollback do
