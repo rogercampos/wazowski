@@ -179,7 +179,7 @@ module Wazowski
         def __wazowski_all_nodes
           nodes_by_attribute = __wazowski_tracked_attrs.values
 
-          (nodes_by_attribute.any? ? nodes_by_attribute.sum : Set.new) +
+          (nodes_by_attribute.any? ? nodes_by_attribute.reduce(:+) : Set.new) +
             __wazowski_tracked_base +
             __wazowski_tracked_any
         end

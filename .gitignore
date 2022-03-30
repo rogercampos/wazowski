@@ -8,3 +8,6 @@
 /tmp/
 .env
 Gemfile.lock
+
+yarn.lock
+node_modules
