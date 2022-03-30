@@ -10,7 +10,9 @@ ActiveRecord::Base.establish_connection(
   adapter: "postgresql",
   database: ENV['WAZOWSKI_PG_DATABASE'],
   username: ENV['WAZOWSKI_PG_USERNAME'],
-  password: ENV['WAZOWSKI_PG_PASSWD']
+  password: ENV['WAZOWSKI_PG_PASSWD'],
+  host: ENV['WAZOWSKI_PG_HOST'],
+  port: ENV['WAZOWSKI_PG_PORT']
 )
 
 ActiveRecord::Schema.define do

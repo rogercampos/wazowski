@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/rogercampos/wazowski.svg?branch=master)](https://travis-ci.org/rogercampos/wazowski)
+![Build status](https://github.com/camaloon/wazowski/actions/workflows/push.yml/badge.svg)
 
 
 # Wazowski
