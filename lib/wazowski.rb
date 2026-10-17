@@ -3,6 +3,7 @@
 require 'active_support/concern'
 require 'active_support/core_ext/module'
 require 'active_record'
+require 'concurrent/map'
 
 require "wazowski/version"
 require 'wazowski/active_record_adapter'
@@ -15,10 +16,15 @@ module Wazowski
     extend ActiveSupport::Concern
 
     class_methods do
-      def observable(name, &block)
+      # `run:` is when the handlers run: :after_commit (the default), once the
+      # transaction has committed, or :before_commit, inside it, just before it
+      # commits. Use :before_commit for derived data that has to be written in
+      # the same transaction as the change it derives from, so that nobody can
+      # read the change without it.
+      def observable(name, run: :after_commit, &block)
         id = "#{self.name || object_id}/#{name}"
 
-        node = Node.new(id, self, block)
+        node = Node.new(id, self, block, run: run)
         Config.derivations[id] = node
 
         ActiveRecordAdapter.register_node(id, node.dependants)
@@ -36,11 +42,16 @@ module Wazowski
   end
 
   class Node
-    attr_reader :name
+    TIMINGS = %i[after_commit before_commit].freeze
 
-    def initialize(name, klass, block)
+    attr_reader :name, :timing
+
+    def initialize(name, klass, block, run: :after_commit)
+      raise ConfigurationError, "run: must be one of #{TIMINGS.inspect}" unless TIMINGS.include?(run)
+
       @name = name
       @observer_klass = klass
+      @timing = run
       instance_eval(&block)
     end
 
@@ -120,9 +131,12 @@ module Wazowski
       Config.derivations[node_id] || raise(NoSuchNode, "Node not found! #{node_id}")
     end
 
-    def run_handlers(changes_per_node)
+    # Runs the handlers of the nodes with the given timing (see Node::TIMINGS)
+    # over the changes accumulated for them in one transaction.
+    def run_handlers(changes_per_node, timing: :after_commit)
       changes_per_node.each do |node_id, changes|
         node = find_node(node_id)
+        next unless node.timing == timing
 
         node.wrapping do
           changes.each do |change_type, klass, object, changeset|

@@ -148,6 +148,29 @@ Your blocks will be executed always on `after_commit`. They will not run if the 
 Before triggering your code, the changes that happened inside the transaction will be accumulated 
 (ej: insert+delete = noop, insert + update = insert, etc.).
 
+### Running inside the transaction
+
+By default handlers run after the transaction commits. Pass `run: :before_commit` to run them inside it instead,
+just before it commits, once all of its changes are in:
+
+```ruby
+class CreditTotals < Wazowski::Observer
+  observable(:spent, run: :before_commit) do
+    depends_on Charge, :amount
+
+    handler(Charge) do |charge, event, changes|
+      # Written in the same transaction as the charge, so nobody can read the
+      # charge without the total that includes it.
+    end
+  end
+end
+```
+
+Use it for derived data that has to be committed together with the change it derives from, for example a counter
+read under a lock that the same transaction holds. The changes are accumulated the same way, the handlers run
+once per transaction, and nothing runs if it is rolled back. Changes a before-commit handler makes to observed
+models are passed on to after-commit handlers only, not back to before-commit ones.
+
 Note that if you update attributes on a model inside a handler, this can result in an infinite loop if the attributes
 you're changing are also observed by the same handler. You can, however, "chain" multiple observers (i.e., one
 handler can trigger an update for an attribute observed in a second handler, etc.) as long as this graph 

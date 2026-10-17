@@ -41,6 +41,18 @@ ActiveRecord::Schema.define do
     table.column :brand, :string
   end
 
+  create_table :tallies, force: true do |t|
+    t.column :total, :integer, default: 0
+  end
+
+  create_table :entries, force: true do |t|
+    t.column :amount, :integer
+  end
+
+  create_table :invoices, force: true do |t|
+    t.column :number, :string
+  end
+
   create_table :planets, force: true do |t|
     t.column :name, :string
     t.column :size, :integer
@@ -68,6 +80,18 @@ class Ship < ActiveRecord::Base
 end
 
 class Planet < ActiveRecord::Base
+end
+
+class Tally < ActiveRecord::Base
+end
+
+class Entry < ActiveRecord::Base
+end
+
+# Writes an entry from its own after-commit callback, as any model with
+# after-commit work might.
+class Invoice < ActiveRecord::Base
+  after_commit { Entry.create!(amount: 7) }
 end
 
 module StubReceiver
@@ -181,6 +205,32 @@ class TestObserver < Wazowski::Observer
 end
 
 
+# Derived data kept in the same transaction as what it derives from.
+class TallyObserver < Wazowski::Observer
+  observable(:total, run: :before_commit) do
+    depends_on Entry, :amount
+
+    handler(Entry) do |entry, change_type, changes|
+      StubReceiver.before_commit(entry, change_type, changes, Entry.connection.transaction_open?)
+
+      delta = case change_type
+              when :insert then entry.amount
+              when :delete then -entry.amount
+              when :update then changes[:amount][1] - changes[:amount][0]
+              end
+      Tally.where(id: Tally.first!.id).update_all(["total = total + ?", delta])
+    end
+  end
+
+  observable(:after_total) do
+    depends_on Entry, :amount
+
+    handler(Entry) do |entry, change_type, _changes|
+      StubReceiver.after_commit(entry, change_type, Entry.connection.transaction_open?)
+    end
+  end
+end
+
 class BaseTest < Minitest::Test
   # Separate tests from util methods
   def self.test(name, &block)
@@ -204,5 +254,8 @@ class BaseTest < Minitest::Test
     Comment.delete_all
     Post.delete_all
     Page.delete_all
+    Entry.delete_all
+    Invoice.delete_all
+    Tally.delete_all
   end
 end
