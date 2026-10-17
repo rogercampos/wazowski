@@ -13,9 +13,13 @@ jobs:
     name: Test against Ruby ${{ matrix.ruby-version }} / Rails ${{ matrix.rails }}
 
     strategy:
+      fail-fast: false
       matrix:
-        ruby-version: ['3.4', '3.3', '3.2']
+        ruby-version: ['4.0', '3.4', '3.3']
         rails: ['8.0', '8.1']
+
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/gemfiles/${{ matrix.rails }}.gemfile
 
     services:
       postgres:
@@ -29,20 +33,13 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Ruby ${{ matrix.ruby-version }}
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
-
-      - name: Install gems
-        env:
-          MATRIX_RAILS_VERSION: ${{ matrix.rails }}
-        run: |
-          export BUNDLE_GEMFILE="${GITHUB_WORKSPACE}/gemfiles/${MATRIX_RAILS_VERSION}.gemfile"
-          gem install bundler
-          bundle install --jobs 4 --retry 3
+          bundler-cache: true
 
       - name: Run tests
         env:

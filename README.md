@@ -1,4 +1,4 @@
-![Build status](https://github.com/camaloon/wazowski/actions/workflows/push.yml/badge.svg)
+![Build status](https://github.com/rogercampos/wazowski/actions/workflows/push.yml/badge.svg)
 
 
 # Wazowski
@@ -37,6 +37,21 @@ And then execute:
 Or install it yourself as:
 
     $ gem install wazowski
+
+Wazowski requires Ruby 3.3+ and Rails (Active Record) 8.0+.
+
+### Loading your observers in a Rails app
+
+An observer only observes once its class has been loaded. With Zeitwerk, classes are loaded on first use, so
+reference your observers when the app boots (and again after every code reload in development):
+
+```ruby
+# config/initializers/wazowski.rb
+Rails.application.config.to_prepare do
+  Salesforce::UserSyncObserver
+  CreditTotals
+end
+```
 
 
 
@@ -91,12 +106,13 @@ observable(:name) do
   depends_on User, :any
   
   handler(User) do |obj, event, changes|
-    # Since you're observing User on any attribute, changes will be always empty
+    # On update, changes will include the old and new values of every attribute that changed
   end
 end
 ```
 
-In this case the handler callback will receive information about all the changes occurred.
+In this case the handler callback will receive information about all the changes occurred. `:any` and `:none`
+cannot be combined with a list of attributes.
 
 You can also observe a model's "presence". Your code will be executed only on create and deletion of the dependant
 model, but not on updates:
@@ -132,7 +148,7 @@ end
 ```
 
 When defining handlers, you can also specify handlers to run only on certain events. You can choose between `:insert`,
-`:update` and `:delete`. 
+`:update` and `:delete`, or a list of them (`only: [:insert, :delete]`).
 
 ```ruby
 observable(:user_sync_to_salesforce) do
@@ -144,6 +160,13 @@ observable(:user_sync_to_salesforce) do
 end
 ```
  
+Observing a class also observes its subclasses (a handler for `Page` runs for a `SubPage` too, unless the observable
+has a handler for `SubPage` itself), but observing a subclass does not observe its parent.
+
+Definitions are checked when the class is loaded: every observed model needs a handler (its own or one for a class it
+inherits from), every handler needs an observed model, and `only:` takes known events only. Mistakes raise
+`Wazowski::ConfigurationError`.
+
 Your blocks will be executed always on `after_commit`. They will not run if the transaction is rolled back. 
 Before triggering your code, the changes that happened inside the transaction will be accumulated 
 (ej: insert+delete = noop, insert + update = insert, etc.).
@@ -170,6 +193,14 @@ Use it for derived data that has to be committed together with the change it der
 read under a lock that the same transaction holds. The changes are accumulated the same way, the handlers run
 once per transaction, and nothing runs if it is rolled back. Changes a before-commit handler makes to observed
 models are passed on to after-commit handlers only, not back to before-commit ones.
+
+Changes are observed through Active Record callbacks, so writes that skip them are not seen: `update_column(s)`,
+`update_all`, `delete`, `delete_all`, `insert_all`, `upsert_all` and the like. An exception raised from an
+after-commit handler propagates to the code that committed (the data is already committed by then), and the
+remaining handlers for that transaction do not run.
+
+Each database connection keeps its own changes, so a model on another database (`connects_to`) commits and runs its
+handlers on its own, independently of what's open on the primary one.
 
 Note that if you update attributes on a model inside a handler, this can result in an infinite loop if the attributes
 you're changing are also observed by the same handler. You can, however, "chain" multiple observers (i.e., one

@@ -61,6 +61,20 @@ ActiveRecord::Schema.define do
     t.column :a3, :string
     t.column :count_on_nested_observers_a1_callings, :integer, default: 0
   end
+
+  create_table :vehicles, force: true do |t|
+    t.column :type, :string
+    t.column :name, :string
+  end
+
+  create_table :boats, force: true do |t|
+    t.column :type, :string
+    t.column :name, :string
+  end
+
+  create_table :tasks, force: true do |t|
+    t.column :name, :string
+  end
 end
 
 class Comment < ActiveRecord::Base
@@ -80,6 +94,31 @@ class Ship < ActiveRecord::Base
 end
 
 class Planet < ActiveRecord::Base
+end
+
+class Vehicle < ActiveRecord::Base
+end
+
+class Car < Vehicle
+end
+
+class Boat < ActiveRecord::Base
+end
+
+class Yacht < Boat
+end
+
+class Task < ActiveRecord::Base
+end
+
+# Its own connection pool, as a model on another database would have.
+class SecondaryRecord < ActiveRecord::Base
+  self.abstract_class = true
+  establish_connection ActiveRecord::Base.connection_db_config.configuration_hash
+end
+
+class SecondaryComment < SecondaryRecord
+  self.table_name = "comments"
 end
 
 class Tally < ActiveRecord::Base
@@ -202,6 +241,49 @@ class TestObserver < Wazowski::Observer
       StubReceiver.trigger_on_subclass(obj, change_type, changes)
     end
   end
+
+  observable(:secondary_comments) do
+    depends_on SecondaryComment, :state
+    handler(SecondaryComment) do |obj, change_type, changes|
+      StubReceiver.trigger_on_secondary(obj, change_type, changes)
+    end
+  end
+end
+
+# A parent class observed before its subclass, and a subclass observed before
+# its parent.
+class InheritanceObserver < Wazowski::Observer
+  observable(:vehicles) do
+    depends_on Vehicle, :name
+    handler(Vehicle) { |obj, change_type, changes| StubReceiver.vehicle(obj, change_type, changes) }
+  end
+
+  observable(:cars) do
+    depends_on Car, :name
+    handler(Car) { |obj, change_type, changes| StubReceiver.car(obj, change_type, changes) }
+  end
+
+  observable(:yachts) do
+    depends_on Yacht, :name
+    handler(Yacht) { |obj, change_type, changes| StubReceiver.yacht(obj, change_type, changes) }
+  end
+
+  observable(:boats) do
+    depends_on Boat, :name
+    handler(Boat) { |obj, change_type, changes| StubReceiver.boat(obj, change_type, changes) }
+  end
+end
+
+# Records which observer instance ran each handler. A thread can set
+# :wazowski_test_pause to stop inside a handler.
+class ContextIsolationObserver < Wazowski::Observer
+  observable(:tasks) do
+    depends_on Task, :none
+    handler(Task) do |task|
+      StubReceiver.context(task.name, object_id)
+      Thread.current[:wazowski_test_pause]&.call
+    end
+  end
 end
 
 
@@ -257,5 +339,8 @@ class BaseTest < Minitest::Test
     Entry.delete_all
     Invoice.delete_all
     Tally.delete_all
+    Vehicle.delete_all
+    Boat.delete_all
+    Task.delete_all
   end
 end

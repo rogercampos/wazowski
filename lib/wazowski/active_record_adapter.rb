@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Wazowski
   module ActiveRecordAdapter
     module TransactionState
@@ -12,7 +14,9 @@ module Wazowski
         TRACKS = %i[after_commit before_commit].freeze
 
         def initialize
-          @changed_models = TRACKS.to_h { |track| [track, Set.new] }
+          # By identity: two instances of the same row are equal to AR, but each
+          # one carries its own changes.
+          @changed_models = TRACKS.to_h { |track| [track, Set.new.compare_by_identity] }
         end
 
         # Inside the transaction, once all of its changes are in. Every record
@@ -34,20 +38,22 @@ module Wazowski
         end
 
         # A record whose transaction rolled back: none of what it changed happened.
+        # Rails runs the rollback callbacks on only one instance of each row, so
+        # the other instances of the same row are forgotten with it.
         def forget(model)
-          @changed_models.each_value { |models| models.delete(model) }
+          @changed_models.each_value do |models|
+            models.select { |other| other.equal?(model) || other == model }.each do |other|
+              models.delete(other)
+              TRACKS.each { |track| other.__wazowski_reset_track!(track) }
+            end
+          end
           TRACKS.each { |track| model.__wazowski_reset_track!(track) }
         end
 
         private
 
         def run!(track)
-          # even @changed_models being a Set, it's possible that the "same" model
-          # have been included in the set before and after persistence (so they're different,
-          # we have both in the set) and by the time this code runs, the non persisted model
-          # becomes persisted and now they're identical, but still in the set.
-          # So we may have duplicates. `.to_a.uniq` to remove them.
-          models = @changed_models[track].to_a.uniq
+          models = @changed_models[track].to_a
           return if models.empty?
 
           @changed_models[track].clear
@@ -69,14 +75,15 @@ module Wazowski
         end
       end
 
-      # One per connection, written from whichever thread holds it: a
-      # Concurrent::Map, so that two threads registering their connections at
-      # once cannot corrupt it.
-      mattr_accessor :states
-      self.states = Concurrent::Map.new
+      # One per connection: a transaction lives on one connection, and a model
+      # on another database commits on its own. Weak keys, so that connections
+      # the pool lets go of take their state with them. The lock is for two
+      # threads registering their connections at once.
+      @states = ObjectSpace::WeakKeyMap.new
+      @lock = Mutex.new
 
-      def self.current_state
-        states.compute_if_absent(ActiveRecord::Base.lease_connection.hash) { StateData.new }
+      def self.for(connection)
+        @lock.synchronize { @states[connection] ||= StateData.new }
       end
     end
 
@@ -84,11 +91,6 @@ module Wazowski
       extend ActiveSupport::Concern
 
       included do
-        cattr_accessor :__wazowski_tracked_attrs, :__wazowski_tracked_base, :__wazowski_tracked_any
-        self.__wazowski_tracked_attrs = {}
-        self.__wazowski_tracked_base = Set.new
-        self.__wazowski_tracked_any = Set.new
-
         before_update do
           self.class.__wazowski_tracked_any.each do |node_id|
             changes.each do |attr, (old_value, _new_value)|
@@ -104,7 +106,7 @@ module Wazowski
         end
 
         before_destroy do
-          unless self.new_record?
+          unless new_record?
             self.class.__wazowski_all_nodes.each do |node_id|
               __wazowski_store_presence!(:delete, node_id)
             end
@@ -118,15 +120,15 @@ module Wazowski
         end
 
         before_commit do
-          TransactionState.current_state.run_before_commit_only_once!
+          __wazowski_transaction_state.run_before_commit_only_once!
         end
 
         after_commit do
-          TransactionState.current_state.run_after_commit_only_once!
+          __wazowski_transaction_state.run_after_commit_only_once!
         end
 
         after_rollback do
-          TransactionState.current_state.forget(self)
+          __wazowski_transaction_state.forget(self)
         end
 
         def __wazowski_store_dirty!(attr, node_id, change_type, attr_was = nil)
@@ -139,15 +141,18 @@ module Wazowski
             dirty[attr][:node_ids] << node_id
           end
 
-          TransactionState.current_state.register_model_changed(self)
+          __wazowski_transaction_state.register_model_changed(self)
         end
 
+        # Idempotent, like the rest of the callbacks: a class gets them twice when
+        # it is observed and so is, later, a class it inherits from.
         def __wazowski_store_presence!(change_type, node_id)
           TransactionState::StateData::TRACKS.each do |track|
-            __wazowski_presence_state(track).push([change_type, node_id])
+            presence = __wazowski_presence_state(track)
+            presence.push([change_type, node_id]) unless presence.include?([change_type, node_id])
           end
 
-          TransactionState.current_state.register_model_changed(self)
+          __wazowski_transaction_state.register_model_changed(self)
         end
 
         def __wazowski_changes_per_node(track = :after_commit)
@@ -192,6 +197,10 @@ module Wazowski
           info
         end
 
+        def __wazowski_transaction_state
+          self.class.with_connection { |connection| TransactionState.for(connection) }
+        end
+
         def __wazowski_reset_track!(track)
           __wazowski_dirty_state(track).clear
           __wazowski_presence_state(track).clear
@@ -208,31 +217,56 @@ module Wazowski
 
       class_methods do
         def __wazowski_track_on!(attr, node_id)
-          __wazowski_tracked_attrs[attr] ||= Set.new
-          __wazowski_tracked_attrs[attr] << node_id
+          (__wazowski_own_tracking[:attrs][attr] ||= Set.new) << node_id
         end
 
         def __wazowski_track_base!(node_id)
-          __wazowski_tracked_base << node_id
+          __wazowski_own_tracking[:base] << node_id
         end
 
         def __wazowski_track_any!(node_id)
-          __wazowski_tracked_any << node_id
+          __wazowski_own_tracking[:any] << node_id
+        end
+
+        def __wazowski_tracked_attrs
+          __wazowski_trackings.each_with_object({}) do |tracking, attrs|
+            tracking[:attrs].each { |attr, node_ids| (attrs[attr] ||= Set.new).merge(node_ids) }
+          end
+        end
+
+        def __wazowski_tracked_any
+          __wazowski_trackings.map { |tracking| tracking[:any] }.reduce(Set.new, :+)
         end
 
         def __wazowski_all_nodes
-          nodes_by_attribute = __wazowski_tracked_attrs.values
+          __wazowski_trackings.reduce(Set.new) do |nodes, tracking|
+            nodes + tracking[:attrs].values.reduce(Set.new, :+) + tracking[:base] + tracking[:any]
+          end
+        end
 
-          (nodes_by_attribute.any? ? nodes_by_attribute.reduce(:+) : Set.new) +
-            __wazowski_tracked_base +
-            __wazowski_tracked_any
+        # What is observed on this class itself. Kept per class, so that observing
+        # a subclass does not observe its parent too.
+        def __wazowski_own_tracking
+          @__wazowski_own_tracking ||= { attrs: {}, base: Set.new, any: Set.new }
+        end
+
+        # What is observed on this class and on the classes it inherits from.
+        def __wazowski_trackings
+          trackings = []
+          klass = self
+          while klass && klass != ActiveRecord::Base
+            tracking = klass.instance_variable_get(:@__wazowski_own_tracking)
+            trackings << tracking if tracking
+            klass = klass.superclass
+          end
+          trackings
         end
       end
     end
 
     def self.register_node(node_id, observed_hierarchy)
       observed_hierarchy.each do |klass, attrs|
-        klass.send(:include, WatchDog) unless klass.included_modules.include?(WatchDog)
+        klass.include(WatchDog) unless klass.include?(WatchDog)
 
         if attrs.size == 1 && attrs[0] == :none
           klass.__wazowski_track_base!(node_id)

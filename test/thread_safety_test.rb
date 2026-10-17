@@ -32,3 +32,47 @@ class ThreadSafetyTest < BaseTest
     assert_equal [a, :update, state: ["foo", "bar"]], StubReceiver.data[:trigger][2]
   end
 end
+
+class ConnectionIsolationTest < BaseTest
+  test "a commit on another connection does not run the handlers of an open transaction" do
+    Comment.transaction do
+      Comment.create!(state: "primary")
+      SecondaryComment.create!(state: "secondary")
+
+      assert_nil StubReceiver.data[:trigger]
+      assert_equal 1, StubReceiver.data[:trigger_on_secondary].size
+      raise ActiveRecord::Rollback
+    end
+
+    assert_nil StubReceiver.data[:trigger]
+  end
+
+  test "each transaction keeps its own observer instance when threads commit at once" do
+    paused = Queue.new
+    resume = Queue.new
+
+    thread = Thread.new do
+      Thread.current[:wazowski_test_pause] = lambda do
+        Thread.current[:wazowski_test_pause] = nil
+        paused << true
+        resume.pop
+      end
+
+      ActiveRecord::Base.connection_pool.with_connection do
+        Task.transaction do
+          Task.create!(name: "first")
+          Task.create!(name: "second")
+        end
+      end
+    end
+
+    paused.pop # the thread is between its two handlers
+    Task.create!(name: "other")
+    resume << true
+    thread.join
+
+    contexts = StubReceiver.data[:context].to_h
+    assert_equal contexts["first"], contexts["second"]
+    refute_equal contexts["first"], contexts["other"]
+  end
+end

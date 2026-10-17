@@ -1,6 +1,4 @@
-lib = File.expand_path("../lib", __FILE__)
-$LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
-require "wazowski/version"
+require_relative "lib/wazowski/version"
 
 Gem::Specification.new do |spec|
   spec.name          = "wazowski"
@@ -8,34 +6,19 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Roger Campos"]
   spec.email         = ["roger@rogercampos.com"]
 
-  spec.summary       = %q{declarative active record data observers}
-  spec.description   = %q{declarative active record data observers}
+  spec.summary       = "Declarative Active Record data observers"
+  spec.description   = "Run your code when the data you declare to observe changes, once per transaction."
   spec.homepage      = "https://github.com/rogercampos/wazowski"
 
-  # Prevent pushing this gem to RubyGems.org. To allow pushes either set the 'allowed_push_host'
-  # to allow pushing to a single host or delete this section to allow pushing to any host.
-  if spec.respond_to?(:metadata)
-    spec.metadata["allowed_push_host"] = "https://rubygems.org"
-  else
-    raise "RubyGems 2.0 or newer is required to protect against " \
-      "public gem pushes."
-  end
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata["rubygems_mfa_required"] = "true"
 
-  spec.files         = `git ls-files -z`.split("\x0").reject do |f|
-    f.match(%r{^(test|spec|features)/})
-  end
-  spec.bindir        = "exe"
-  spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
+  spec.files         = Dir["lib/**/*.rb", "README.md", "CHANGELOG.md"]
   spec.require_paths = ["lib"]
 
-  spec.required_ruby_version = ">= 3.2.0"
+  spec.required_ruby_version = ">= 3.3.0"
 
   spec.add_dependency "activerecord", ">= 8.0"
   spec.add_dependency "activesupport", ">= 8.0"
-
-  spec.add_development_dependency "bundler"
-  spec.add_development_dependency "rake"
-  spec.add_development_dependency "minitest"
-  spec.add_development_dependency "pg"
-  spec.add_development_dependency "dotenv"
 end

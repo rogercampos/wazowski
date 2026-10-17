@@ -3,7 +3,6 @@
 require 'active_support/concern'
 require 'active_support/core_ext/module'
 require 'active_record'
-require 'concurrent/map'
 
 require "wazowski/version"
 require 'wazowski/active_record_adapter'
@@ -43,6 +42,7 @@ module Wazowski
 
   class Node
     TIMINGS = %i[after_commit before_commit].freeze
+    EVENTS = %i[insert update delete].freeze
 
     attr_reader :name, :timing
 
@@ -52,7 +52,10 @@ module Wazowski
       @name = name
       @observer_klass = klass
       @timing = run
+      @depends_on = {}
+      @handlers = {}
       instance_eval(&block)
+      validate!
     end
 
     def depends_on(klass, *attrs)
@@ -60,16 +63,23 @@ module Wazowski
         raise ConfigurationError, 'Must depend on some attributes. You can also use `:none` and `:any`'
       end
 
-      @depends_on ||= {}
-      @depends_on[klass] ||= []
-      @depends_on[klass] += attrs
+      attrs = (@depends_on[klass] ||= []).concat(attrs)
+
+      if attrs.size > 1 && attrs.intersect?(%i[none any])
+        raise ConfigurationError, "`:none` and `:any` cannot be combined with other attributes of #{klass}"
+      end
     end
 
-    def handler(klass, opts = {}, &block)
-      @handlers ||= {}
+    def handler(klass, only: nil, &block)
       raise ConfigurationError, "Already defined handler for #{klass}" if @handlers[klass]
+      raise ConfigurationError, "The handler for #{klass} needs a block" unless block
 
-      @handlers[klass] = { block: block, opts: opts }
+      events = only.nil? ? EVENTS : Array(only)
+      if events.empty? || !(events - EVENTS).empty?
+        raise ConfigurationError, "only: must be one or more of #{EVENTS.inspect}, got #{only.inspect}"
+      end
+
+      @handlers[klass] = { block: block, only: events }
     end
 
     def dependants
@@ -80,49 +90,47 @@ module Wazowski
       "<Wazowski::Node #{@name}>"
     end
 
+    # The handler for klass or, failing that, for the closest class it inherits from.
     def lookup_handler(klass)
-      handler = if @handlers[klass]
-                  @handlers[klass]
-                else
-                  lookup_handler(klass.superclass) unless klass.superclass == Object
-                end
+      handler_klass = klass
+      handler_klass = handler_klass.superclass until handler_klass.nil? || @handlers.key?(handler_klass)
 
-      if handler.nil?
+      if handler_klass.nil?
         raise(ConfigurationError, "Cannot run handler for klass #{klass}, it has been never "\
                                   'registered! Check your definitions.')
       end
 
-      handler
+      @handlers[handler_klass]
     end
 
-    def wrapping
-      @context = @observer_klass.new
+    # Runs the handlers over the changes of one transaction, all with the same
+    # new instance of the observer class as context. The context is local to
+    # the call: the node is shared by every thread.
+    def run(changes)
+      context = @observer_klass.new
 
-      yield
+      changes.each do |change_type, klass, object, changeset|
+        handler = lookup_handler(klass)
+        next unless handler[:only].include?(change_type)
+
+        context.instance_exec(object, change_type, changeset || {}, &handler[:block])
+      end
     end
 
-    def after_commit_on_update(klass, object, dirty_changes)
-      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
-      handler = lookup_handler(klass)
+    private
 
-      return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:update)
-      @context.instance_exec(object, :update, dirty_changes, &handler[:block])
-    end
+    # Mistakes in the definition would otherwise only show up later, once some
+    # transaction commits.
+    def validate!
+      raise ConfigurationError, "#{@name} must depend on something, use `depends_on`" if @depends_on.empty?
 
-    def after_commit_on_delete(klass, object)
-      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
-      handler = lookup_handler(klass)
+      @depends_on.each_key { |klass| lookup_handler(klass) }
 
-      return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:delete)
-      @context.instance_exec(object, :delete, {}, &handler[:block])
-    end
+      @handlers.each_key do |klass|
+        next if @depends_on.each_key.any? { |dependant| dependant <= klass }
 
-    def after_commit_on_create(klass, object)
-      raise ConfigurationError, "Needs to be called within a #wrapping call!" if @context.nil?
-      handler = lookup_handler(klass)
-
-      return unless handler[:opts][:only].nil? || [handler[:opts][:only]].flatten.include?(:insert)
-      @context.instance_exec(object, :insert, {}, &handler[:block])
+        raise ConfigurationError, "#{@name} has a handler for #{klass} but does not depend on it"
+      end
     end
   end
 
@@ -138,18 +146,7 @@ module Wazowski
         node = find_node(node_id)
         next unless node.timing == timing
 
-        node.wrapping do
-          changes.each do |change_type, klass, object, changeset|
-            case change_type
-              when :insert
-                node.after_commit_on_create(klass, object)
-              when :delete
-                node.after_commit_on_delete(klass, object)
-              when :update
-                node.after_commit_on_update(klass, object, changeset)
-            end
-          end
-        end
+        node.run(changes)
       end
     end
   end
