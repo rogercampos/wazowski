@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# Leave a directory with a working git worktree of this library.
+#
+#   bin/setup-worktree DIR --id ID [--provision]
+#
+# Run it from the library's main checkout (the one this script lives in). DIR
+# is where the worktree goes: missing or empty, it is created; already there,
+# it must be a worktree of this same repository, or the script stops without
+# touching it. Running it again does only what is still missing.
+#
+# Always:
+#   - stops every process still running from DIR (a test run an earlier run
+#     started there and left behind), TERM and then KILL;
+#   - fetches origin and leaves DIR on a detached HEAD at origin/main (git
+#     refuses to check out `main` twice), reset hard and cleaned, keeping only
+#     dependency caches and the files copied below;
+#   - copies the gitignored files the tests need from the main checkout
+#     (.env, whose database it swaps for the worktree's own: wazowski_ID),
+#     and the Claude Code local files (.claude/settings.local.json,
+#     CLAUDE.local.md) when there are any.
+#
+# --provision also makes it runnable: Ruby installed (mise, from the root
+# .ruby-version), every bundle of the repository complete (one per committed
+# Gemfile.lock), and the worktree's database
+# (wazowski_ID) created on the Postgres server the main checkout's .env names,
+# when it is not there yet.
+#
+# ID names what the worktree must not share with the others, so a caller passes
+# the same one for the same DIR every time: lowercase letters, digits and
+# underscores, starting with a letter.
+#
+# On failure it prints one line starting with "setup-worktree: FAILED" that
+# says during which step and why, and exits non-zero.
+
+set -Eeuo pipefail
+
+REQUIRED_FILES=()
+OPTIONAL_FILES=(.claude/settings.local.json CLAUDE.local.md)
+KEEP_CACHES=(node_modules vendor .bundle)
+
+STEP="arguments"
+log() { printf '[setup-worktree %s] %s\n' "$STEP" "$*"; }
+fail() {
+  trap - ERR
+  printf 'setup-worktree: FAILED during %s: %s\n' "$STEP" "$*" >&2
+  exit 1
+}
+on_error() {
+  local code=$1 line=$2 cmd=$3
+  trap - ERR
+  printf 'setup-worktree: FAILED during %s: `%s` exited with %s (line %s)\n' "$STEP" "$cmd" "$code" "$line" >&2
+  exit "$code"
+}
+trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
+trap 'trap - ERR; printf "setup-worktree: FAILED during %s: interrupted\n" "$STEP" >&2; exit 130' INT TERM
+step() { STEP="$1"; log "start"; }
+
+usage() {
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+DIR=""
+ID=""
+PROVISION=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --id) [[ $# -ge 2 ]] || fail "--id needs a value"; ID="$2"; shift 2 ;;
+    --provision) PROVISION=1; shift ;;
+    -h|--help) usage ;;
+    -*) fail "unknown option $1" ;;
+    *) [[ -z "$DIR" ]] || fail "only one directory, got '$DIR' and '$1'"; DIR="$1"; shift ;;
+  esac
+done
+[[ -n "$DIR" ]] || fail "the target directory is required (bin/setup-worktree DIR --id ID)"
+[[ -n "$ID" ]] || fail "--id is required"
+[[ "$ID" =~ ^[a-z][a-z0-9_]*$ ]] || fail "--id '$ID' must be lowercase letters, digits and underscores, starting with a letter"
+
+MAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+[[ "$(git -C "$MAIN" rev-parse --absolute-git-dir)" == "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)" ]] ||
+  fail "$MAIN is itself a linked worktree; run bin/setup-worktree from the main checkout"
+COMMON_DIR="$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)"
+
+DIR="${DIR/#\~/$HOME}"
+[[ "$DIR" == /* ]] || DIR="$PWD/$DIR"
+mkdir -p "$(dirname "$DIR")" || fail "cannot create $(dirname "$DIR")"
+DIR="$(cd "$(dirname "$DIR")" && pwd -P)/$(basename "$DIR")"
+case "$DIR/" in
+  "$MAIN/"*) fail "$DIR is inside the main checkout $MAIN" ;;
+esac
+
+# ── Fetch ────────────────────────────────────────────────────────────────────
+step fetch
+for attempt in 1 2 3; do
+  # Another fetch of the same clone can hold a ref lock for a moment.
+  if git -C "$MAIN" fetch --quiet --no-tags origin '+refs/heads/main:refs/remotes/origin/main'; then break; fi
+  [[ $attempt -lt 3 ]] || fail "git fetch origin failed three times in $MAIN"
+  sleep $((attempt * 2))
+done
+
+# ── Worktree ─────────────────────────────────────────────────────────────────
+step worktree
+if [[ -e "$DIR" && ! -d "$DIR" ]]; then
+  fail "$DIR exists and is not a directory"
+fi
+if [[ ! -d "$DIR" || -z "$(ls -A "$DIR")" ]]; then
+  git -C "$MAIN" worktree prune
+  log "creating $DIR at origin/main"
+  git -C "$MAIN" worktree add --quiet --detach "$DIR" origin/main
+else
+  top="$(git -C "$DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  common="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [[ -z "$top" || "$(cd "$top" && pwd -P)" != "$DIR" ]]; then
+    fail "$DIR is not empty and is not a git worktree; refusing to touch it. Move it away or empty it."
+  fi
+  if [[ "$common" != "$COMMON_DIR" ]]; then
+    fail "$DIR is a git worktree of another repository ($common), not of $MAIN; refusing to touch it."
+  fi
+  log "reusing $DIR"
+fi
+
+# ── Stop what an earlier run left running ────────────────────────────────────
+step stop
+# A server or test worker started in DIR by an earlier run outlives it and
+# serves code about to be reset under it. Every process whose working
+# directory is in DIR goes, except this script's own ancestry.
+ancestors=" "
+pid=$$
+while [[ -n "$pid" && "$pid" != 0 && "$pid" != 1 ]]; do
+  ancestors+="$pid "
+  pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+done
+leftovers() {
+  lsof -nP -w -d cwd -Fpn 2>/dev/null | awk -v dir="$DIR" -v skip="$ancestors" '
+    /^p/ { pid = substr($0, 2) }
+    /^n/ { path = substr($0, 2)
+           if ((path == dir || index(path, dir "/") == 1) && index(skip, " " pid " ") == 0) print pid }'
+}
+pids="$(leftovers)"
+if [[ -n "$pids" ]]; then
+  log "stopping what is still running in $DIR: $(ps -o pid=,command= -p "$(echo $pids | tr ' ' ,)" | cut -c1-120 | tr '\n' ';')"
+  kill -TERM $pids 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    pids="$(leftovers)"
+    [[ -n "$pids" ]] || break
+    sleep 1
+  done
+  if [[ -n "$pids" ]]; then
+    kill -KILL $pids 2>/dev/null || true
+    sleep 1
+  fi
+  pids="$(leftovers)"
+  [[ -z "$pids" ]] || fail "could not stop processes still running in $DIR: $(echo $pids)"
+fi
+
+# ── Reset to origin/main ─────────────────────────────────────────────────────
+step reset
+cd "$DIR"
+for verb in rebase merge cherry-pick revert am; do
+  git "$verb" --abort >/dev/null 2>&1 || true
+done
+# Locks a killed git left behind live in the worktree's own git directory.
+GIT_DIR_PATH="$(git rev-parse --absolute-git-dir)"
+rm -f "$GIT_DIR_PATH/index.lock" "$GIT_DIR_PATH/HEAD.lock"
+git checkout --quiet --detach
+git reset --quiet --hard origin/main
+clean_args=()
+for p in "${KEEP_CACHES[@]}"; do clean_args+=(-e "$p"); done
+for p in "${REQUIRED_FILES[@]}" "${OPTIONAL_FILES[@]}" .env; do
+  clean_args+=(-e "/$p")
+done
+git clean -ffdxq "${clean_args[@]}"
+log "at $(git rev-parse --short HEAD) (origin/main)"
+
+# ── Files from the main checkout ─────────────────────────────────────────────
+step files
+ensure_ignored() {
+  git check-ignore -q --no-index "$1" ||
+    fail "$1 is not ignored by .gitignore at origin/main; it would end up in a commit made in $DIR"
+}
+copy_file() {
+  local rel=$1
+  ensure_ignored "$rel"
+  if [[ -f "$rel" ]] && cmp -s "$MAIN/$rel" "$rel"; then return; fi
+  mkdir -p "$(dirname "$rel")"
+  cp -f "$MAIN/$rel" "$rel"
+  log "copied $rel"
+}
+for rel in "${REQUIRED_FILES[@]}"; do
+  [[ -f "$MAIN/$rel" ]] || fail "$MAIN/$rel is missing; the tests cannot run without it"
+  copy_file "$rel"
+done
+for rel in "${OPTIONAL_FILES[@]}"; do
+  if [[ -f "$MAIN/$rel" ]]; then
+    copy_file "$rel"
+  elif [[ -e "$rel" ]]; then
+    rm -f "$rel"
+    log "removed $rel (no longer in $MAIN)"
+  fi
+done
+
+# ── A database of its own ────────────────────────────────────────────────────
+step env
+# The tests connect to the database .env names. The worktree's .env is the
+# main checkout's with the database swapped for this worktree's own, on the
+# same server: wazowski_ID.
+TEST_DB="wazowski_${ID}"
+grep -q '^WAZOWSKI_PG_DATABASE=' "$MAIN/.env" || fail "$MAIN/.env has no WAZOWSKI_PG_DATABASE"
+content="$(sed "s/^WAZOWSKI_PG_DATABASE=.*/WAZOWSKI_PG_DATABASE=$TEST_DB/" "$MAIN/.env")"
+ensure_ignored .env
+if [[ "$(cat .env 2>/dev/null || true)" != "$content" ]]; then
+  printf '%s\n' "$content" > .env
+  log "wrote .env ($TEST_DB)"
+fi
+chmod 600 .env
+
+if [[ $PROVISION -eq 0 ]]; then
+  STEP=done
+  log "ready for reading: $DIR"
+  exit 0
+fi
+
+# ── Ruby ─────────────────────────────────────────────────────────────────────
+step ruby
+command -v mise >/dev/null 2>&1 || fail "mise is not installed; it provides the Ruby pinned in .ruby-version"
+[[ -f .ruby-version ]] || fail "no .ruby-version at the root of origin/main"
+mise install --quiet
+RUN=(mise exec --)
+log "$("${RUN[@]}" ruby -v)"
+
+# ── Gems ─────────────────────────────────────────────────────────────────────
+step bundle
+# One bundle per committed Gemfile.lock.
+locks="$(git ls-files -- 'Gemfile.lock' '*/Gemfile.lock')"
+[[ -n "$locks" ]] || fail "no Gemfile.lock is committed at origin/main"
+while IFS= read -r lock; do
+  gemfile="$DIR/$(dirname "$lock")/Gemfile"
+  [[ -f "$gemfile" ]] || fail "$lock has no Gemfile next to it"
+  if ! BUNDLE_GEMFILE="$gemfile" "${RUN[@]}" bundle check >/dev/null 2>&1; then
+    BUNDLE_GEMFILE="$gemfile" "${RUN[@]}" bundle install --quiet
+  fi
+  log "bundle complete: $lock"
+done <<< "$locks"
+
+# ── Database ─────────────────────────────────────────────────────────────────
+step database
+# Created when missing, never dropped: the test helper recreates its tables
+# (create_table force: true) on every run. The name is checked before anything
+# touches the server, so nothing but this worktree's own database is created.
+"${RUN[@]}" bundle exec ruby -rpg -rdotenv -e '
+  Dotenv.load(".env")
+  db = ENV.fetch("WAZOWSKI_PG_DATABASE")
+  abort "refusing to touch #{db}: not wazowski_#{ARGV[0]}" unless db == "wazowski_#{ARGV[0]}"
+  conn = PG.connect(dbname: "postgres", user: ENV["WAZOWSKI_PG_USERNAME"], password: ENV["WAZOWSKI_PG_PASSWD"],
+                    host: ENV["WAZOWSKI_PG_HOST"], port: ENV["WAZOWSKI_PG_PORT"])
+  if conn.exec_params("SELECT 1 FROM pg_database WHERE datname = $1", [db]).ntuples.zero?
+    conn.exec("CREATE DATABASE #{conn.quote_ident(db)}")
+    puts "[setup-worktree database] created #{db}"
+  else
+    puts "[setup-worktree database] #{db} is there"
+  end
+' "$ID" || fail "could not reach or create the database $TEST_DB (is the Postgres in $MAIN/.env up?)"
+
+STEP=done
+log "ready to run: $DIR"

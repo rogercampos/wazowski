@@ -1,3 +1,11 @@
+# SimpleCov must start before the library is loaded, or it cannot see it.
+require "simplecov"
+SimpleCov.start do
+  add_filter "/test/"
+  add_filter "/gemfiles/"
+  enable_coverage :branch
+end
+
 $LOAD_PATH.unshift File.expand_path("../../lib", __FILE__)
 
 require "wazowski"

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Run the suite with SimpleCov and leave its report at the root.
+#
+#   bin/coverage
+#
+# test/test_helper.rb starts SimpleCov, which writes coverage/.resultset.json
+# at the root of the repository. Exits non-zero when a test failed; the report
+# is left either way.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
+
+rm -rf "$ROOT/coverage"
+status=0
+bundle exec rake test || status=1
+
+if [[ ! -f "$ROOT/coverage/.resultset.json" ]]; then
+  echo "bin/coverage: the suite left no coverage/.resultset.json" >&2
+  status=1
+fi
+exit $status

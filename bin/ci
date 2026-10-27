@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Every verification the repo has, in one command. Run it before you push.
+#
+#   bin/ci
+#
+# Steps are declared in config/ci.rb (the Rails 8.1 bin/ci + config/ci.rb
+# convention). It runs against the default Gemfile; the Ruby × Rails matrix
+# of gemfiles/ is GitHub Actions' to run. The tests need the Postgres database
+# .env names.
+Dir.chdir(File.expand_path("..", __dir__))
+
+require "bundler/setup"
+require "active_support"
+require "active_support/continuous_integration"
+
+CI = ActiveSupport::ContinuousIntegration
+require_relative "../config/ci"
