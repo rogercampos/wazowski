@@ -6,9 +6,12 @@
 #   bin/ci
 #
 # Steps are declared in config/ci.rb (the Rails 8.1 bin/ci + config/ci.rb
-# convention). It runs against the default Gemfile; the Ruby × Rails matrix
-# of gemfiles/ is GitHub Actions' to run. The tests need the Postgres database
-# .env names.
+# convention). It runs against the default Gemfile; the Rails versions in
+# gemfiles/ are run by hand:
+#
+#   BUNDLE_GEMFILE=gemfiles/8.0.gemfile bundle exec rake test
+#
+# The tests need the Postgres database .env names.
 Dir.chdir(File.expand_path("..", __dir__))
 
 require "bundler/setup"

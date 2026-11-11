@@ -1,6 +1,3 @@
-![Build status](https://github.com/rogercampos/wazowski/actions/workflows/push.yml/badge.svg)
-
-
 # Wazowski
 
 You can use this library to observe changes on data and execute your code when those changes occur.
