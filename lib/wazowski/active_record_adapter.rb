@@ -102,7 +102,7 @@ module Wazowski
         private
 
         def pending_for(record, node_id)
-          @pending[Wazowski.find_node(node_id).timing][record] ||= PendingChanges.new(record)
+          @pending[Registry.find(node_id).timing][record] ||= PendingChanges.new(record)
         end
 
         def run!(timing)
@@ -116,7 +116,7 @@ module Wazowski
             changes_per_node.merge!(changes.per_node) { |_, old_val, new_val| old_val + new_val }
           end
 
-          Wazowski.run_handlers(changes_per_node)
+          changes_per_node.each { |node_id, changes| Registry.find(node_id).run(changes) }
         end
       end
 

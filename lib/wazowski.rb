@@ -1,43 +1,45 @@
 # frozen_string_literal: true
 
 require 'active_support/concern'
-require 'active_support/core_ext/module'
 require 'active_record'
 
 require "wazowski/version"
 require 'wazowski/active_record_adapter'
 
 module Wazowski
-  NoSuchNode = Class.new(StandardError)
+  # The public API is Observer (with observable, depends_on and handler) and
+  # ConfigurationError. Everything else is internal and private, and may change
+  # without notice.
   ConfigurationError = Class.new(StandardError)
 
-  module Observable
-    extend ActiveSupport::Concern
-
-    class_methods do
+  class Observer
+    class << self
       # `run:` is when the handlers run: :after_commit (the default), once the
       # transaction has committed, or :before_commit, inside it, just before it
       # commits. Use :before_commit for derived data that has to be written in
       # the same transaction as the change it derives from, so that nobody can
       # read the change without it.
       def observable(name, run: :after_commit, &block)
-        id = "#{self.name || object_id}/#{name}"
-
-        node = Node.new(id, self, block, run: run)
-        Config.derivations[id] = node
-
-        ActiveRecordAdapter.register_node(id, node.dependants)
+        node = Node.new("#{self.name || object_id}/#{name}", self, block, run: run)
+        Registry.add(node)
+        ActiveRecordAdapter.register_node(node.name, node.dependants)
       end
     end
   end
 
-  class Observer
-    include Observable
-  end
+  # Every observable defined, by id. The adapter keeps ids and looks the nodes
+  # up when it needs them, so that redefining an observable (code reloading)
+  # replaces it.
+  module Registry
+    @nodes = {}
 
-  module Config
-    mattr_accessor :derivations
-    self.derivations = {}
+    def self.add(node)
+      @nodes[node.name] = node
+    end
+
+    def self.find(node_id)
+      @nodes.fetch(node_id)
+    end
   end
 
   class Node
@@ -134,18 +136,5 @@ module Wazowski
     end
   end
 
-  class << self
-    def find_node(node_id)
-      Config.derivations[node_id] || raise(NoSuchNode, "Node not found! #{node_id}")
-    end
-
-    # Runs the handlers of each node over the changes accumulated for it in one
-    # transaction. The adapter calls it at each node's timing (Node#timing).
-    def run_handlers(changes_per_node)
-      changes_per_node.each do |node_id, changes|
-        find_node(node_id).run(changes)
-      end
-    end
-  end
+  private_constant :Registry, :Node, :ActiveRecordAdapter
 end
-

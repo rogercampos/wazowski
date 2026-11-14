@@ -21,19 +21,15 @@ end
 
 ## Installation
 
-Add this line to your application's Gemfile:
+Wazowski is used from git `main`. Add this line to your application's Gemfile:
 
 ```ruby
-gem 'wazowski'
+gem "wazowski", github: "rogercampos/wazowski", branch: "main"
 ```
 
 And then execute:
 
     $ bundle
-
-Or install it yourself as:
-
-    $ gem install wazowski
 
 Wazowski requires Ruby 3.3+ and Rails (Active Record) 8.0 or 8.1.
 
@@ -74,6 +70,15 @@ different ORM's, etc) while maintaining a unique view about how to declare data 
 
 
 ## Detailed usage and public API
+
+The public API is:
+
+- `Wazowski::Observer`, the class your observers inherit from.
+- Its `observable(name, run: :after_commit)` class method, and inside its block `depends_on(Model, *attributes)` and
+  `handler(Model, only: events) { |record, event, changes| ... }`.
+- `Wazowski::ConfigurationError`, raised for mistakes in a definition.
+
+Everything else in the gem is internal and private, and may change without notice.
 
 You must start by creating a class inheriting from `Wazowski::Observer`. Then, you can declare observers with the
 `observable` method and syntax described below. The organization of the observers is up to you, you can declare 
@@ -164,9 +169,10 @@ Definitions are checked when the class is loaded: every observed model needs a h
 inherits from), every handler needs an observed model, and `only:` takes known events only. Mistakes raise
 `Wazowski::ConfigurationError`.
 
-Your blocks will be executed always on `after_commit`. They will not run if the transaction is rolled back. 
-Before triggering your code, the changes that happened inside the transaction will be accumulated 
-(ej: insert+delete = noop, insert + update = insert, etc.).
+By default your blocks run after the transaction commits (see below to run them inside it). They do not run if the
+transaction is rolled back. Before your code runs, the changes that happened inside the transaction are accumulated:
+an insert followed by a delete is nothing, an insert followed by updates is an insert, and several updates are one
+update, with the value before the transaction as the old value.
 
 ### Running inside the transaction
 
@@ -283,60 +289,13 @@ end
 ```
 
 
-## Internal details
-
-This tool currently works only with ActiveRecord, but it's design accepts multiple adapters if you ever want
-to write a new one. 
-
-The public API currently supports only relational info, but it could be expanded in the future to support 
-other types of data (graph, key/value, etc.) maintaining backwards compatibility.
-
-Even tough the current public API works by specifying directly models (ej: `User`) this class is never used
-internally and is only forwarded to the adapter. To use this library with a repository pattern, the same API
-could be used but instead of providing AR Classes your could provide Repository classes. However, this is only
-an idea, no attempt to use this with a repository pattern has been tried. 
-
-
-### Adapter's API
-
-- An adapter is the responsible to actually observe the data. It will receive the information provided by the
-user about what data has to be observed (models, attributes) and it will be responsible of calling Wazowski's hooks
-whenever a database commit happens.
-
-- An adapter is a module or class.
-
-- An adapter must implement a `register_node` class method. This method receives 1) a node_id (string) and 
-2) a hash of Class => list_of_attributes (as symbols) as defined in the public DSL. The adapter must use this information to
-prepare its setup. It must keep the `node_id` string to reuse it. An attribute can also be `:none` or `:any`. 
-For `:none`, the observer indicates it only wants to receive creation and deletion callbacks. For `:any`, the observer
-indicates it wants to receive all callbacks, including updates on any attribute, but no need to pass specific 
-dirty info. 
-
-- The adapter must call `Wazowski.run_handlers(changes_per_node)` once and only once per transaction, even if
-multiple models have changed inside the transaction, at the timing of the nodes it passes
-(`Wazowski.find_node(node_id).timing`): for `:after_commit` nodes once the transaction has committed, for
-`:before_commit` nodes inside it, just before it commits. It must provide as
-an argument the accumulated information of changes occurred per node inside the transaction. This data structure
-is a hash where each key is a node_id (as provided in the `register_node` call) and each value is an array of
-changes occurred on that node. A change is defined as an array of 3 elements: the change type, the class and the 
-object. Example:
-
-```ruby
-{
-  "TestObserver/valid_comments_count"=>[[:insert, Post, #<Post id: 1, ...>]],
-  "TestObserver/only_on_insert"=>[[:insert, Post, #<Post id: 1, ...>]]}
-}
-```
- 
-- The adapter must behave in a transactional way, i.e., if a record is created and deleted inside a transaction, no
-callback should be called whatsoever. 
-
-
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+After checking out the repo, run `bin/setup` to install dependencies. The tests need a Postgres database, named by
+the `WAZOWSKI_PG_*` variables in `.env`. Run `bin/ci` to run the tests on every supported Rails version, or
+`bundle exec rake test` for the default one. You can also run `bin/console` for an interactive prompt.
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+What is pushed to `main` is what apps get at their next `bundle update wazowski`.
 
 ## Contributing
 

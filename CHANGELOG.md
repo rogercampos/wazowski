@@ -8,7 +8,10 @@
   change goes only to the timing of the node that observes it: a save observed only by `run: :before_commit` nodes no
   longer builds a changeset for after-commit handlers that is then thrown away. Observed models no longer get
   `__wazowski_*` methods.
-- `Wazowski.run_handlers` no longer takes `timing:`; the adapter calls it with the changes of one timing's nodes only.
+- The public API is `Wazowski::Observer` (`observable`, `depends_on`, `handler`) and `Wazowski::ConfigurationError`.
+  The rest is now private: `Wazowski::Node` and `Wazowski::ActiveRecordAdapter` are private constants, and
+  `Wazowski::Config`, `Wazowski::Observable`, `Wazowski::NoSuchNode`, `Wazowski.find_node` and `Wazowski.run_handlers`
+  are gone. The README no longer documents an adapter API.
 - Fix: a record saved more than once in a transaction reports the attribute's value from before the transaction as the
   old value also when that value was `nil` (a later save used to replace it with its own old value).
 
