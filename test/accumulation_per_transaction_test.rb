@@ -33,6 +33,17 @@ class AccumulationPerTransactionTest < BaseTest
     assert_equal 2, StubReceiver.data[:trigger].size
     assert_equal [a, :delete, {}], StubReceiver.data[:trigger][1]
   end
+
+  test "update + update = one update from the value before the transaction, also when it was nil" do
+    a = Comment.create!
+
+    Comment.transaction do
+      a.update!(state: 'published')
+      a.update!(state: 'spam')
+    end
+
+    assert_equal [a, :update, { state: [nil, 'spam'] }], StubReceiver.data[:trigger].last
+  end
 end
 
 class SameRowTwiceTest < BaseTest

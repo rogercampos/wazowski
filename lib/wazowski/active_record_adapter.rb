@@ -12,8 +12,9 @@ module Wazowski
       end
 
       def update(attr, node_id, old_value)
-        update = (@updates[attr] ||= { old_value: nil, node_ids: Set.new })
-        update[:old_value] = old_value if update[:old_value].nil?
+        # The first save's old value is the value before the transaction; later
+        # saves in it keep it, whatever it is (nil included).
+        update = (@updates[attr] ||= { old_value: old_value, node_ids: Set.new })
         update[:node_ids] << node_id
       end
 
