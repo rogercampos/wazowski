@@ -6,10 +6,8 @@
 #   bin/ci
 #
 # Steps are declared in config/ci.rb (the Rails 8.1 bin/ci + config/ci.rb
-# convention). It runs against the default Gemfile; the Rails versions in
-# gemfiles/ are run by hand:
-#
-#   BUNDLE_GEMFILE=gemfiles/8.0.gemfile bundle exec rake test
+# convention). It runs the tests on every Rails version the gemspec allows:
+# the default Gemfile (8.1) and gemfiles/8.0.gemfile.
 #
 # The tests need the Postgres database .env names.
 Dir.chdir(File.expand_path("..", __dir__))

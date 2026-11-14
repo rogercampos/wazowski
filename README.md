@@ -35,7 +35,7 @@ Or install it yourself as:
 
     $ gem install wazowski
 
-Wazowski requires Ruby 3.3+ and Rails (Active Record) 8.0+.
+Wazowski requires Ruby 3.3+ and Rails (Active Record) 8.0 or 8.1.
 
 ### Loading your observers in a Rails app
 

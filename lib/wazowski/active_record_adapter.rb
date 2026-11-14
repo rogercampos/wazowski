@@ -119,7 +119,7 @@ module Wazowski
           end
         end
 
-        before_commit do
+        ActiveRecordAdapter.before_commit_hook(self) do
           __wazowski_transaction_state.run_before_commit_only_once!
         end
 
@@ -262,6 +262,30 @@ module Wazowski
           trackings
         end
       end
+    end
+
+    # The one place Wazowski uses Active Record API that is not public: the
+    # model-level `before_commit` callback, marked `# :nodoc:` in
+    # active_record/transactions.rb. `run: :before_commit` handlers depend on
+    # it, and Active Record has no public alternative (ActiveRecord::Transaction
+    # offers only after_commit and after_rollback).
+    #
+    # What the before-commit handlers rely on, covered by
+    # test/before_commit_test.rb: it fires inside the transaction, once the
+    # transaction's changes are in, for every record changed in it, including
+    # those saved in savepoints; and not at all when the transaction rolls back.
+    #
+    # Because Active Record may change it without notice, the gemspec caps
+    # Active Record at the newest minor the test suite has run on. Raise the cap
+    # only after `bin/ci` passes on the new version.
+    def self.before_commit_hook(model, &block)
+      unless model.respond_to?(:before_commit)
+        raise NotImplementedError,
+          "Active Record #{ActiveRecord.version} has no model-level before_commit callback, " \
+          "which Wazowski's run: :before_commit handlers need"
+      end
+
+      model.before_commit(&block)
     end
 
     def self.register_node(node_id, observed_hierarchy)

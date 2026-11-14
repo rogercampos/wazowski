@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Active Record and Active Support are capped below 8.2. `run: :before_commit` relies on Active Record's undocumented
+  model-level `before_commit` callback, so each new Rails minor is allowed only once the test suite has passed on it.
+
 ## 0.4.0
 
 - Requires Ruby 3.3+ and Rails 8.0+. Tested on Ruby 3.3, 3.4 and 4.0.
