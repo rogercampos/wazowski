@@ -35,17 +35,16 @@ Wazowski requires Ruby 3.3+ and Rails (Active Record) 8.0 or 8.1.
 
 ### Loading your observers in a Rails app
 
-An observer only observes once its class has been loaded. With Zeitwerk, classes are loaded on first use, so
-reference your observers when the app boots (and again after every code reload in development):
+Put your observers in `app/observers`. An observer only observes once its class has been loaded, and with eager
+loading off (development, most test runs) Zeitwerk loads a class only when something references it. So Wazowski's
+Railtie loads every file under `app/observers` when the app boots, and again after every code reload, onto the
+reloaded models. There's nothing to configure.
 
-```ruby
-# config/initializers/wazowski.rb
-Rails.application.config.to_prepare do
-  Salesforce::UserSyncObserver
-  CreditTotals
-end
-```
+Subdirectories are namespaces as usual: `app/observers/credit_tally/tracking.rb` defines `CreditTally::Tracking`, also
+when `CreditTally` is a model.
 
+An observer anywhere else is not loaded for you. Reference it from a `to_prepare` block of your own, or it observes
+nothing until some code happens to load it.
 
 
 ## Why this?

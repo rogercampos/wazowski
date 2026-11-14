@@ -5,6 +5,7 @@ require 'active_record'
 
 require "wazowski/version"
 require 'wazowski/active_record_adapter'
+require 'wazowski/railtie' if defined?(Rails::Railtie)
 
 module Wazowski
   # The public API is Observer (with observable, depends_on and handler) and
@@ -137,4 +138,5 @@ module Wazowski
   end
 
   private_constant :Registry, :Node, :ActiveRecordAdapter
+  private_constant :Railtie if defined?(Railtie)
 end

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A Railtie loads every observer under `app/observers` at boot and after every code reload, so apps no longer list
+  their observers in a `to_prepare` initializer, and an observer added there can't be left out by mistake. Observers
+  elsewhere still need loading by hand.
 - Active Record and Active Support are capped below 8.2. `run: :before_commit` relies on Active Record's undocumented
   model-level `before_commit` callback, so each new Rails minor is allowed only once the test suite has passed on it.
 - Pending changes are kept by the adapter, per connection, instead of in instance variables of each record, and each
