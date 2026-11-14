@@ -312,8 +312,10 @@ For `:none`, the observer indicates it only wants to receive creation and deleti
 indicates it wants to receive all callbacks, including updates on any attribute, but no need to pass specific 
 dirty info. 
 
-- The adapter must call the `Wazowski.run_handlers(changes_per_node)` every time a transaction is committed, 
-once and only once per transaction even if multiple models have changed inside the transaction. It must provide as
+- The adapter must call `Wazowski.run_handlers(changes_per_node)` once and only once per transaction, even if
+multiple models have changed inside the transaction, at the timing of the nodes it passes
+(`Wazowski.find_node(node_id).timing`): for `:after_commit` nodes once the transaction has committed, for
+`:before_commit` nodes inside it, just before it commits. It must provide as
 an argument the accumulated information of changes occurred per node inside the transaction. This data structure
 is a hash where each key is a node_id (as provided in the `register_node` call) and each value is an array of
 changes occurred on that node. A change is defined as an array of 3 elements: the change type, the class and the 

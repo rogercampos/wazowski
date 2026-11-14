@@ -139,14 +139,11 @@ module Wazowski
       Config.derivations[node_id] || raise(NoSuchNode, "Node not found! #{node_id}")
     end
 
-    # Runs the handlers of the nodes with the given timing (see Node::TIMINGS)
-    # over the changes accumulated for them in one transaction.
-    def run_handlers(changes_per_node, timing: :after_commit)
+    # Runs the handlers of each node over the changes accumulated for it in one
+    # transaction. The adapter calls it at each node's timing (Node#timing).
+    def run_handlers(changes_per_node)
       changes_per_node.each do |node_id, changes|
-        node = find_node(node_id)
-        next unless node.timing == timing
-
-        node.run(changes)
+        find_node(node_id).run(changes)
       end
     end
   end
