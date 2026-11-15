@@ -2,38 +2,54 @@
 
 module Wazowski
   module ActiveRecordAdapter
-    # What one record changed in one transaction, for the nodes of one timing,
-    # not yet handled.
+    # What one record changed and is not handled yet, for the nodes of one
+    # timing. Each change remembers the transaction (or savepoint) it was made
+    # in, so that rolling one back forgets only what was made in it.
     class PendingChanges
       def initialize(record)
         @record = record
-        @updates = {} # attr => { old_value:, node_ids: }
-        @presence = [] # [change_type, node_id], each once
+        @updates = {} # attr => [{ transaction:, old_value:, node_ids: }], one per transaction, oldest first
+        @presence = [] # [transaction, change_type, node_id], each once
       end
 
-      def update(attr, node_id, old_value)
-        # The first save's old value is the value before the transaction; later
-        # saves in it keep it, whatever it is (nil included).
-        update = (@updates[attr] ||= { old_value: old_value, node_ids: Set.new })
-        update[:node_ids] << node_id
+      def update(transaction, attr, node_id, old_value)
+        steps = (@updates[attr] ||= [])
+        # A later save in the same transaction keeps the old value of its first
+        # save, whatever it is (nil included).
+        step = steps.find { |s| s[:transaction].equal?(transaction) }
+        steps << (step = { transaction: transaction, old_value: old_value, node_ids: Set.new }) unless step
+        step[:node_ids] << node_id
       end
 
-      def presence(change_type, node_id)
-        @presence << [change_type, node_id] unless @presence.include?([change_type, node_id])
+      def presence(transaction, change_type, node_id)
+        entry = [transaction, change_type, node_id]
+        @presence << entry unless @presence.include?(entry)
+      end
+
+      # Forgets what was changed in a transaction that rolled back. True when
+      # nothing is left.
+      def discard(transaction)
+        @updates.each_value { |steps| steps.reject! { |step| step[:transaction].equal?(transaction) } }
+        @updates.reject! { |_, steps| steps.empty? }
+        @presence.reject! { |t, *| t.equal?(transaction) }
+        @updates.empty? && @presence.empty?
       end
 
       # node_id => [[change_type, class, record, changeset]]. A record inserted
       # or deleted reports only that, and one both inserted and deleted reports
-      # nothing. The new values are read now, when the handlers are about to run.
+      # nothing. An update's old value is the one before the oldest change left;
+      # the new values are read now, when the handlers are about to run.
       def per_node
-        types = @presence.map(&:first)
+        presence = @presence.map { |_, change_type, node_id| [change_type, node_id] }.uniq
+        types = presence.map(&:first)
         changes = {}
 
         unless types.include?(:insert) || types.include?(:delete)
           changesets = {}
-          @updates.each do |attr, update|
-            update[:node_ids].each do |node_id|
-              (changesets[node_id] ||= {})[attr] = [update[:old_value], @record.send(attr)]
+          @updates.each do |attr, steps|
+            change = [steps.first[:old_value], @record.send(attr)]
+            steps.map { |step| step[:node_ids] }.reduce(:|).each do |node_id|
+              (changesets[node_id] ||= {})[attr] = change
             end
           end
 
@@ -43,7 +59,7 @@ module Wazowski
         end
 
         unless types.include?(:insert) && types.include?(:delete)
-          @presence.each do |change_type, node_id|
+          presence.each do |change_type, node_id|
             (changes[node_id] ||= []) << [change_type, @record.class, @record]
           end
         end
@@ -61,19 +77,25 @@ module Wazowski
       # callbacks starts the next transaction on the same connection before that
       # first one's after-commit handlers may have run, and its changes still
       # have to reach the before-commit handlers.
+      #
+      # A rollback is followed through Active Record's public
+      # ActiveRecord::Transaction#after_rollback, registered on each transaction
+      # or savepoint the first time something changes in it. Rails moves the
+      # callback of a released savepoint to its parent, so it fires if any
+      # transaction around the change rolls back, and only then.
       class StateData
         def initialize
-          # Per record by identity: two instances of the same row are equal to
-          # AR, but each one carries its own changes.
-          @pending = Node::TIMINGS.to_h { |timing| [timing, {}.compare_by_identity] }
+          @pending = {}
+          @transactions = {}
+          Node::TIMINGS.each { |timing| reset(timing) }
         end
 
-        def record_update(record, node_id, attr, old_value)
-          pending_for(record, node_id).update(attr, node_id, old_value)
+        def record_update(record, transaction, node_id, attr, old_value)
+          pending_for(record, transaction, node_id).update(transaction, attr, node_id, old_value)
         end
 
-        def record_presence(record, node_id, change_type)
-          pending_for(record, node_id).presence(change_type, node_id)
+        def record_presence(record, transaction, node_id, change_type)
+          pending_for(record, transaction, node_id).presence(transaction, change_type, node_id)
         end
 
         # Inside the transaction, once all of its changes are in. Every record
@@ -83,37 +105,54 @@ module Wazowski
         # ones.
         def run_before_commit_only_once!
           run!(:before_commit)
-          @pending[:before_commit].clear
+          reset(:before_commit)
         end
 
         def run_after_commit_only_once!
           run!(:after_commit)
         end
 
-        # A record whose transaction rolled back: none of what it changed happened.
-        # Rails runs the rollback callbacks on only one instance of each row, so
-        # the other instances of the same row are forgotten with it.
-        def forget(record)
-          @pending.each_value do |pending|
-            pending.delete_if { |other, _| other.equal?(record) || other == record }
-          end
-        end
-
         private
 
-        def pending_for(record, node_id)
-          @pending[Registry.find(node_id).timing][record] ||= PendingChanges.new(record)
+        def reset(timing)
+          # Per record by identity: two instances of the same row are equal to
+          # AR, but each one carries its own changes.
+          @pending[timing] = {}.compare_by_identity
+          # transaction => the records changed in it, as keys.
+          @transactions[timing] = {}.compare_by_identity
+        end
+
+        def pending_for(record, transaction, node_id)
+          timing = Registry.find(node_id).timing
+
+          records = (@transactions[timing][transaction] ||= begin
+            transaction.after_rollback { discard(timing, transaction) }
+            {}.compare_by_identity
+          end)
+          records[record] = true
+
+          @pending[timing][record] ||= PendingChanges.new(record)
+        end
+
+        # A transaction or savepoint rolled back: none of what was changed in it
+        # happened. What the rest of the transaction changed stays.
+        def discard(timing, transaction)
+          records = @transactions[timing].delete(transaction) or return
+          pending = @pending[timing]
+          records.each_key { |record| pending.delete(record) if pending[record]&.discard(transaction) }
         end
 
         def run!(timing)
           pending = @pending[timing]
           return if pending.empty?
 
-          @pending[timing] = {}.compare_by_identity
+          reset(timing)
 
           changes_per_node = {}
           pending.each_value do |changes|
-            changes_per_node.merge!(changes.per_node) { |_, old_val, new_val| old_val + new_val }
+            changes.per_node.each do |node_id, node_changes|
+              (changes_per_node[node_id] ||= []).concat(node_changes)
+            end
           end
 
           changes_per_node.each { |node_id, changes| Registry.find(node_id).run(changes) }
@@ -204,16 +243,17 @@ module Wazowski
       included do
         before_update do
           state = TransactionState.of(self)
+          transaction = self.class.current_transaction
 
           Tracking.any(self.class).each do |node_id|
             changes.each do |attr, (old_value, _new_value)|
-              state.record_update(self, node_id, attr.to_sym, old_value)
+              state.record_update(self, transaction, node_id, attr.to_sym, old_value)
             end
           end
 
           Tracking.attrs(self.class).each do |attr, node_ids|
             if send("#{attr}_changed?")
-              node_ids.each { |node_id| state.record_update(self, node_id, attr, send("#{attr}_was")) }
+              node_ids.each { |node_id| state.record_update(self, transaction, node_id, attr, send("#{attr}_was")) }
             end
           end
         end
@@ -221,13 +261,15 @@ module Wazowski
         before_destroy do
           unless new_record?
             state = TransactionState.of(self)
-            Tracking.all(self.class).each { |node_id| state.record_presence(self, node_id, :delete) }
+            transaction = self.class.current_transaction
+            Tracking.all(self.class).each { |node_id| state.record_presence(self, transaction, node_id, :delete) }
           end
         end
 
         before_create do
           state = TransactionState.of(self)
-          Tracking.all(self.class).each { |node_id| state.record_presence(self, node_id, :insert) }
+          transaction = self.class.current_transaction
+          Tracking.all(self.class).each { |node_id| state.record_presence(self, transaction, node_id, :insert) }
         end
 
         ActiveRecordAdapter.before_commit_hook(self) do
@@ -236,10 +278,6 @@ module Wazowski
 
         after_commit do
           TransactionState.of(self).run_after_commit_only_once!
-        end
-
-        after_rollback do
-          TransactionState.of(self).forget(self)
         end
       end
     end

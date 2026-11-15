@@ -169,9 +169,10 @@ inherits from), every handler needs an observed model, and `only:` takes known e
 `Wazowski::ConfigurationError`.
 
 By default your blocks run after the transaction commits (see below to run them inside it). They do not run if the
-transaction is rolled back. Before your code runs, the changes that happened inside the transaction are accumulated:
-an insert followed by a delete is nothing, an insert followed by updates is an insert, and several updates are one
-update, with the value before the transaction as the old value.
+transaction is rolled back. Rolling back a savepoint (`transaction(requires_new: true)`) drops only what changed
+inside it; the rest of the transaction still counts. Before your code runs, the changes that happened inside the
+transaction are accumulated: an insert followed by a delete is nothing, an insert followed by updates is an insert,
+and several updates are one update, with the value before the transaction as the old value.
 
 ### Running inside the transaction
 
