@@ -2,12 +2,14 @@ require "test_helper"
 
 class AccumulationPerTransactionTest < BaseTest
   test "optimized accumulated actions inside a transaction: insert + delete = noop" do
+    b = nil
     Comment.transaction do
       a = Comment.create!
       a.destroy
+      b = Comment.create!
     end
 
-    assert_nil StubReceiver.data[:trigger]
+    assert_equal [[b, :insert, {}]], StubReceiver.data[:trigger]
   end
 
   test "optimized accumulated actions inside a transaction: insert + update = insert" do

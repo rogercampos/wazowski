@@ -1,8 +1,8 @@
 # SimpleCov must start before the library is loaded, or it cannot see it.
 require "simplecov"
 SimpleCov.start do
-  add_filter "/test/"
-  add_filter "/gemfiles/"
+  skip "/test/"
+  skip "/gemfiles/"
   enable_coverage :branch
 end
 
@@ -11,6 +11,7 @@ $LOAD_PATH.unshift File.expand_path("../../lib", __FILE__)
 require "wazowski"
 
 require "minitest/autorun"
+require "active_support/testing/declarative"
 require 'dotenv/load'
 
 # Cannot use in-memory db so that we can test thread safety features with a connection pool
@@ -322,19 +323,7 @@ class TallyObserver < Wazowski::Observer
 end
 
 class BaseTest < Minitest::Test
-  # Separate tests from util methods
-  def self.test(name, &block)
-    test_name = "test_#{name.gsub(/\s+/, '_')}".to_sym
-    defined = method_defined? test_name
-    raise "#{test_name} is already defined in #{self}" if defined
-    if block_given?
-      define_method(test_name, &block)
-    else
-      define_method(test_name) do
-        flunk "No implementation provided for #{name}"
-      end
-    end
-  end
+  extend ActiveSupport::Testing::Declarative
 
   def setup
     super

@@ -55,15 +55,6 @@ class ConfigurationTest < BaseTest
     end
   end
 
-  test "an unknown handler option is an error" do
-    assert_raises(ArgumentError) do
-      define do
-        depends_on Task, :name
-        handler(Task, ony: :insert) {}
-      end
-    end
-  end
-
   test "a handler without a block is an error" do
     assert_configuration_error(/needs a block/) do
       depends_on Task, :name

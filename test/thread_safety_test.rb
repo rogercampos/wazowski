@@ -1,50 +1,48 @@
 require "test_helper"
 
 class ThreadSafetyTest < BaseTest
-  # Synchronize concurrent actions to first update on both threads and then
-  # commit on both threads, using sleep.
   test "isolates changes per active record connection" do
     a = Comment.create! state: "foo", post_id: 1
-    id = a.id
+    b_id = Comment.create!(state: "foo", post_id: 1).id
+    updated = Queue.new
+    resume = Queue.new
 
-    t1 = Thread.new do
+    thread = Thread.new do
       ActiveRecord::Base.connection_pool.with_connection do
         ActiveRecord::Base.transaction do
-          # update must happen in a new AR object to isolate
-          # both threads
-          Comment.find(id).update!(state: "bar")
-          sleep 0.1
+          Comment.find(b_id).update!(state: "bar")
+          updated << true
+          resume.pop
         end
       end
     end
 
-    ActiveRecord::Base.transaction do
-      a.update!(post_id: 2)
-      sleep 0.05
-    end
+    updated.pop # the thread's update is in, not committed
+    a.update!(post_id: 2)
 
-    assert_equal 2, StubReceiver.data[:trigger].size
-    assert_equal [a, :update, post_id: [1, 2]], StubReceiver.data[:trigger][1]
+    assert_equal [[a, :update, { post_id: [1, 2] }]], StubReceiver.data[:trigger].drop(2)
 
-    t1.join
+    resume << true
+    thread.join
 
-    assert_equal 3, StubReceiver.data[:trigger].size
-    assert_equal [a, :update, state: ["foo", "bar"]], StubReceiver.data[:trigger][2]
+    b, change_type, changes = StubReceiver.data[:trigger].last
+    assert_equal [b_id, :update, { state: %w[foo bar] }], [b.id, change_type, changes]
   end
 end
 
 class ConnectionIsolationTest < BaseTest
   test "a commit on another connection does not run the handlers of an open transaction" do
-    Comment.transaction do
-      Comment.create!(state: "primary")
-      SecondaryComment.create!(state: "secondary")
+    Tally.create!
+    entry = nil
 
-      assert_nil StubReceiver.data[:trigger]
-      assert_equal 1, StubReceiver.data[:trigger_on_secondary].size
-      raise ActiveRecord::Rollback
+    Entry.transaction do
+      entry = Entry.create!(amount: 5)
+      SecondaryComment.create!(state: "secondary")
     end
 
-    assert_nil StubReceiver.data[:trigger]
+    assert_equal 1, StubReceiver.data[:trigger_on_secondary].size
+    # Run once, by its own commit: not from inside its transaction.
+    assert_equal [[entry, :insert, false]], StubReceiver.data[:after_commit]
   end
 
   test "each transaction keeps its own observer instance when threads commit at once" do

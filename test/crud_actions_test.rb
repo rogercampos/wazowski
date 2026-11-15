@@ -27,13 +27,14 @@ class CrudActionsTest < BaseTest
     assert_equal 1, StubReceiver.data[:trigger].size
   end
 
-  test "CREATE / calls trigger only on after commit" do
+  test "CREATE / a rolled back insert never reaches the trigger" do
     Comment.transaction do
       Comment.create!
       raise ActiveRecord::Rollback
     end
+    b = Comment.create!
 
-    assert_nil StubReceiver.data[:trigger]
+    assert_equal [[b, :insert, {}]], StubReceiver.data[:trigger]
   end
 
   test "DELETE / calls the trigger" do
@@ -60,11 +61,14 @@ class CrudActionsTest < BaseTest
     assert_equal [a, :delete, {}], StubReceiver.data[:trigger][1]
   end
 
-  test "DELETE / doesn't call the trigger on not persisted object" do
-    a = Post.new
-    a.destroy
+  test "DELETE / destroying a not persisted object is not a change" do
+    b = nil
+    Post.transaction do
+      Post.new.destroy
+      b = Post.create!
+    end
 
-    assert_nil StubReceiver.data[:trigger]
+    assert_equal [[b, :insert, {}]], StubReceiver.data[:trigger]
   end
 
   test "UPDATE / calls the trigger" do
