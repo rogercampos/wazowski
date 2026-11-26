@@ -5,8 +5,14 @@ require "open3"
 class RailtieTest < Minitest::Test
   BOOT = File.expand_path("fixtures/rails_app/boot.rb", __dir__)
 
+  # The app is booted once for the file: every run does the same, so the tests
+  # read what the one boot printed.
+  def self.app_run
+    @app_run ||= Open3.capture3(RbConfig.ruby, BOOT)
+  end
+
   def run_app
-    out, err, status = Open3.capture3(RbConfig.ruby, BOOT)
+    out, err, status = self.class.app_run
     assert status.success?, err
     JSON.parse(out)
   end
